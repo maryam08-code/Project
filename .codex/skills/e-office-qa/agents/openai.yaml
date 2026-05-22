@@ -1,0 +1,6 @@
+interface:
+  display_name: "E-Office QA"
+  short_description: "Black-box, RBAC, workflow test guidance"
+  default_prompt: "Use $e-office-qa to verify the current E-Office workflow against PRD.md."
+policy:
+  allow_implicit_invocation: true

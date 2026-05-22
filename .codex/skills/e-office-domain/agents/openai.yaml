@@ -1,0 +1,6 @@
+interface:
+  display_name: "E-Office Domain"
+  short_description: "PRD workflows, roles, and state machines"
+  default_prompt: "Use $e-office-domain to plan the next MVP workflow from PRD.md."
+policy:
+  allow_implicit_invocation: true

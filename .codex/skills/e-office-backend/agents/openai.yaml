@@ -1,0 +1,6 @@
+interface:
+  display_name: "E-Office Backend"
+  short_description: "APIs, RBAC, DB, audit, files, reports"
+  default_prompt: "Use $e-office-backend to implement the next E-Office API module."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,6 @@
+interface:
+  display_name: "E-Office Frontend"
+  short_description: "Role dashboards, forms, tables, archives"
+  default_prompt: "Use $e-office-frontend to build the next role-based E-Office screen."
+policy:
+  allow_implicit_invocation: true
