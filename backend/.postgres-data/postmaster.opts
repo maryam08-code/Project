@@ -1,1 +1,0 @@
-D:/SEMPRO/Project/backend/node_modules/@embedded-postgres/windows-x64/native/bin/postgres.exe "-D" "D:\SEMPRO\Project\backend\.postgres-data" "-p" "5432"

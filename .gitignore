@@ -29,3 +29,10 @@ Thumbs.db
 # Storage / Backups
 backend/storage/
 
+
+# PostgreSQL data directory
+backend/.postgres-data/
+
+# Frontend dev logs
+frontend/.next-dev.err.log
+frontend/.next-dev.out.log
