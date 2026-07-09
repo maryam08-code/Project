@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script to run both backend and frontend of E-Office application
-# Usage: ./run-all.sh
+# Usage: ./run-all.sh {start|start-backend|start-frontend|stop|status|restart|install|install-all}
 
 set -e
 
@@ -89,19 +89,42 @@ check_status() {
     fi
 }
 
+# Function to install dependencies
+install_deps() {
+    echo "Installing dependencies..."
+    cd "$SCRIPT_DIR/frontend"
+    npm install
+    echo "Frontend dependencies installed!"
+}
+
+# Function to install all dependencies (frontend + backend)
+install_all() {
+    echo "Installing all dependencies..."
+    cd "$SCRIPT_DIR/frontend"
+    npm install
+    cd "$SCRIPT_DIR/backend"
+    npm install
+    echo "All dependencies installed!"
+}
+
+# Function to run both backend and frontend
+run_all() {
+    start_database
+    start_backend
+    start_frontend
+    echo ""
+    echo "E-Office application is running!"
+    echo "  - Database: localhost:5432 (embedded PostgreSQL)"
+    echo "  - Backend: http://localhost:8000"
+    echo "  - Frontend: http://localhost:3000"
+    echo ""
+    echo "Press Ctrl+C to stop all services"
+}
+
 # Main script
 case "${1:-start}" in
     start)
-        start_database
-        start_backend
-        start_frontend
-        echo ""
-        echo "E-Office application is running!"
-        echo "  - Database: localhost:5432 (embedded PostgreSQL)"
-        echo "  - Backend: http://localhost:8000"
-        echo "  - Frontend: http://localhost:3000"
-        echo ""
-        echo "Press Ctrl+C to stop all services"
+        run_all
         ;;
     start-backend)
         start_backend
@@ -120,13 +143,16 @@ case "${1:-start}" in
     restart)
         stop_all
         sleep 2
-        start_database
-        start_backend
-        start_frontend
-        echo "E-Office application restarted!"
+        run_all
+        ;;
+    install)
+        install_deps
+        ;;
+    install-all)
+        install_all
         ;;
     *)
-        echo "Usage: $0 {start|start-backend|start-frontend|stop|status|restart}"
+        echo "Usage: $0 {start|start-backend|start-frontend|stop|status|restart|install|install-all}"
         exit 1
         ;;
 esac
