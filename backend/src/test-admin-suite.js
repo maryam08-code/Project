@@ -249,30 +249,7 @@ async function main() {
     assertStrictEqual(hitRateLimit, true, 'Should trigger 429 Too Many Requests');
   });
 
-  // --- 5. AUDIT TRAIL (AUD-001, AUD-002) ---
 
-  await execute('AUD-001: Fetch Audit Logs', async () => {
-    const res = await request(`${BASE_URL}/api/audit-logs`, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${adminToken}` }
-    });
-    assertStrictEqual(res.statusCode, 200, 'Fetching audit logs should succeed');
-    if (res.data.data.length > 0) {
-      testAuditId = res.data.data[0].id;
-    }
-  });
-
-  await execute('AUD-002: Review an Audit Log', async () => {
-    if (!testAuditId) throw new Error('No audit logs available to review');
-    const res = await request(`${BASE_URL}/api/audit-logs/${testAuditId}/review`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` }
-    }, {
-      notes: 'Reviewed by automated test suite',
-      status: 'valid'
-    });
-    assertStrictEqual(res.statusCode, 200, 'Reviewing audit log should succeed');
-  });
 
   console.log(`\n=== AUDIT SUITE COMPLETE ===`);
   console.log(`Results: ${passedTests}/${totalTests} Passed`);

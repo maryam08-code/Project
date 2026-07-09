@@ -32,6 +32,7 @@ backend/storage/
 
 # PostgreSQL data directory
 backend/.postgres-data/
+.run/
 
 # Frontend dev logs
 frontend/.next-dev.err.log

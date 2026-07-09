@@ -11,7 +11,7 @@ const roleConfig = {
   },
   Operator: {
     name: "Rina Operator",
-    nav: ["Dashboard", "Ajuan Masuk", "Surat Masuk", "Surat Keluar", "Arsip", "Laporan"],
+    nav: ["Dashboard", "Ajuan Masuk", "Surat Masuk", "Surat Keluar"],
     stats: [["Ajuan Masuk", "27"], ["Surat Masuk", "124"], ["Surat Keluar", "76"], ["Perlu Verifikasi", "11"]]
   },
   Pimpinan: {
@@ -21,12 +21,12 @@ const roleConfig = {
   },
   Administrator: {
     name: "Admin Sistem",
-    nav: ["Dashboard", "Pengguna", "Arsip", "Laporan", "Audit Trail", "Backup"],
-    stats: [["Pengguna", "48"], ["Role", "5"], ["Audit Hari Ini", "129"], ["Backup", "03:00"]]
+    nav: ["Dashboard", "Pengguna", "Backup"],
+    stats: [["Pengguna", "48"], ["Role", "5"], ["Backup", "03:00"]]
   },
   Pegawai: {
     name: "Sari Pegawai",
-    nav: ["Dashboard", "Disposisi", "Arsip", "Notifikasi"],
+    nav: ["Dashboard", "Disposisi", "Notifikasi"],
     stats: [["Surat Diterima", "14"], ["Undangan", "8"], ["Pengumuman", "5"], ["Download", "11"]]
   }
 };
@@ -52,16 +52,6 @@ const rows = {
     ["DSP-2026-020", "SM/106/V/2026", "Keuangan", "Telaah dan laporkan", "Ditindaklanjuti"],
     ["DSP-2026-019", "SM/103/V/2026", "Sekretariat", "Arsipkan setelah selesai", "Selesai"]
   ],
-  Arsip: [
-    ["ARS-1124", "Surat Masuk", "Permintaan data layanan", "PDF", "Selesai"],
-    ["ARS-1123", "Ajuan Surat", "Pendampingan audit internal", "DOCX", "Disetujui"],
-    ["ARS-1122", "Disposisi", "Telaah dan laporkan", "PDF", "Selesai"]
-  ],
-  "Arsip Digital": [
-    ["ARS-1124", "Surat Masuk", "Permintaan data layanan", "PDF", "Selesai"],
-    ["ARS-1123", "Ajuan Surat", "Pendampingan audit internal", "DOCX", "Disetujui"],
-    ["ARS-1122", "Disposisi", "Telaah dan laporkan", "PDF", "Selesai"]
-  ],
   "Konsep Surat": [
     ["AJ-2026-0004", "Surat Izin Penelitian", "Menunggu kelengkapan lampiran", "Budi Santoso", "Draft"],
     ["AJ-2026-0003", "Surat Tugas", "Konsep kegiatan lapangan", "Budi Santoso", "Draft"],
@@ -76,11 +66,6 @@ const rows = {
     ["USR-001", "Rina Operator", "Operator", "Tata Usaha", "Aktif"],
     ["USR-002", "Dewi Pimpinan", "Pimpinan", "Kepala Bagian", "Aktif"],
     ["USR-003", "Budi Santoso", "User", "Kepegawaian", "Aktif"]
-  ],
-  "Audit Trail": [
-    ["10:42 WIB", "Rina Operator", "Surat Masuk", "Teruskan surat AG-2026-041"],
-    ["10:21 WIB", "Budi Santoso", "Ajuan Surat", "Kirim ajuan AJ-2026-0007"],
-    ["09:55 WIB", "Admin Sistem", "Users", "Ubah status pengguna"]
   ]
 };
 
@@ -97,12 +82,9 @@ const tableHeads = {
   "Surat Masuk": ["Agenda", "Nomor Surat", "Pengirim", "Perihal", "Status"],
   "Surat Keluar": ["Nomor", "Jenis", "Tujuan", "Perihal", "Status"],
   Disposisi: ["ID", "Nomor Surat", "Tujuan", "Instruksi", "Status"],
-  Arsip: ["Kode", "Tipe", "Perihal", "Format", "Status"],
-  "Arsip Digital": ["Kode", "Tipe", "Perihal", "Format", "Status"],
   "Konsep Surat": ["Nomor", "Jenis", "Perihal", "Pengaju", "Status"],
   "Status Ajuan": ["Nomor", "Jenis", "Perihal", "Pengaju", "Status"],
-  Pengguna: ["ID", "Nama", "Role", "Unit Kerja", "Status"],
-  "Audit Trail": ["Waktu", "User", "Modul", "Aktivitas"]
+  Pengguna: ["ID", "Nama", "Role", "Unit Kerja", "Status"]
 };
 
 const initialAjuanRequests = [
@@ -168,7 +150,6 @@ export default function Home() {
   const [ajuanRequests, setAjuanRequests] = useState(initialAjuanRequests);
   const [userRows, setUserRows] = useState(initialUsers);
   const [currentUser, setCurrentUser] = useState(null);
-  const [auditRows, setAuditRows] = useState([]);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   function resolveRoleName(roleCode) {
@@ -200,32 +181,6 @@ export default function Home() {
     }
   }, []);
 
-  const loadAuditLogs = useCallback(async () => {
-    try {
-      const data = await api.getAuditLogs({ perPage: 100 });
-      if (data && data.data) {
-        const mapped = data.data.map(log => {
-          const dateStr = new Date(log.created_at).toLocaleString("id-ID", {
-            timeZone: "Asia/Jakarta",
-            hour: "2-digit",
-            minute: "2-digit"
-          }) + " WIB";
-          
-          return [
-            dateStr,
-            log.user_name || "Sistem",
-            log.module,
-            log.activity,
-            log
-          ];
-        });
-        setAuditRows(mapped);
-      }
-    } catch (e) {
-      console.error("Gagal memuat audit log", e);
-    }
-  }, []);
-
   useEffect(() => {
     async function loadMe() {
       try {
@@ -248,9 +203,8 @@ export default function Home() {
   useEffect(() => {
     if (loggedIn && role === "Administrator") {
       loadUsers();
-      loadAuditLogs();
     }
-  }, [loggedIn, role, loadUsers, loadAuditLogs]);
+  }, [loggedIn, role, loadUsers]);
 
   useEffect(() => {
     function handleUnauthorized() {
@@ -535,15 +489,13 @@ export default function Home() {
           {currentView === "Dashboard" && (role === "Operator" ? <OperatorDashboard setView={setView} /> : role === "Pimpinan" ? <PimpinanDashboard setView={setView} /> : role === "Administrator" ? <AdminDashboard setView={setView} /> : <Dashboard config={config} role={role} setView={setView} />)}
           {currentView === "Pengaturan Profil" && <ProfileSettings currentUser={currentUser} setCurrentUser={setCurrentUser} config={config} role={role} setConfirm={setConfirm} />}
           {currentView === "Notifikasi" && <Notifications />}
-          {currentView === "Laporan" && <Reports setConfirm={setConfirm} />}
           {currentView === "Approval" && <Approval setConfirm={setConfirm} />}
           {currentView === "Ajuan Surat" && <AjuanSuratHome setConfirm={setConfirm} onCreateAjuan={createAjuanRequest} currentUserName={config.name} ajuanRequests={ajuanRequests} />}
           {currentView === "Ajuan Masuk" && <OperatorAjuanMasuk setConfirm={setConfirm} ajuanRequests={ajuanRequests} />}
           {currentView === "Surat Masuk" && <IncomingLetterForm role={role} setConfirm={setConfirm} />}
           {currentView === "Disposisi Masuk" && <DisposisiMasukHome setConfirm={setConfirm} />}
-          {currentView === "Arsip" && <ArchiveHome setConfirm={setConfirm} />}
           {currentView === "Backup" && <AdminBackup setConfirm={setConfirm} />}
-          {["Konsep Surat", "Status Ajuan", "Surat Keluar", "Disposisi", "Arsip Digital", "Pengguna", "Audit Trail"].includes(currentView) && (
+          {["Konsep Surat", "Status Ajuan", "Surat Keluar", "Disposisi", "Pengguna"].includes(currentView) && (
             <ModuleView
               view={currentView}
               query={query}
@@ -553,10 +505,8 @@ export default function Home() {
               setConfirm={setConfirm}
               userRows={userRows}
               onCreateUser={createUser}
-              auditRows={auditRows}
               onUserDelete={handleDeleteUser}
               onUserResetPassword={handleResetPassword}
-              onAuditReviewSuccess={loadAuditLogs}
             />
           )}
         </section>
@@ -895,10 +845,8 @@ function PimpinanDashboard({ setView }) {
 function AdminDashboard({ setView }) {
   const [usersCount, setUsersCount] = useState(0);
   const [activeUsersCount, setActiveUsersCount] = useState(0);
-  const [auditTodayCount, setAuditTodayCount] = useState(0);
   const [lastBackupText, setLastBackupText] = useState("-");
   const [recentUsers, setRecentUsers] = useState([]);
-  const [recentAudits, setRecentAudits] = useState([]);
 
   useEffect(() => {
     async function fetchData() {
@@ -913,23 +861,6 @@ function AdminDashboard({ setView }) {
         if (allUsersRes && allUsersRes.data) {
           const activeCount = allUsersRes.data.filter(u => u.status === "aktif").length;
           setActiveUsersCount(activeCount);
-        }
-
-        const auditRes = await api.getAuditLogs({ perPage: 10 });
-        if (auditRes && auditRes.data) {
-          const today = new Date().toDateString();
-          const todayCount = auditRes.data.filter(log => new Date(log.created_at).toDateString() === today).length;
-          setAuditTodayCount(todayCount);
-
-          const mappedAudits = auditRes.data.slice(0, 5).map(log => {
-            const timeStr = new Date(log.created_at).toLocaleString("id-ID", {
-              timeZone: "Asia/Jakarta",
-              hour: "2-digit",
-              minute: "2-digit"
-            }) + " WIB";
-            return [timeStr, log.user_name || "Sistem", log.module, log.activity];
-          });
-          setRecentAudits(mappedAudits);
         }
 
         const backupsRes = await api.getBackups({ perPage: 5 });
@@ -965,7 +896,6 @@ function AdminDashboard({ setView }) {
   const cards = [
     ["Total Pengguna", String(usersCount), `${activeUsersCount} akun aktif`, "user", "blue", "Pengguna"],
     ["Role Sistem", "5", "RBAC dasar aktif", "shield", "purple", "Pengguna"],
-    ["Audit Hari Ini", String(auditTodayCount), "Aktivitas tercatat", "clock", "orange", "Audit Trail"],
     ["Backup", lastBackupText, "Terakhir berhasil", "upload", "green", "Backup"]
   ];
 
@@ -973,7 +903,7 @@ function AdminDashboard({ setView }) {
     <section className="dashboardPage">
       <div className="dashboardTitle">
         <h1>Dashboard Administrator</h1>
-        <p>Ringkasan pengguna, role, audit trail, backup, dan kesehatan sistem.</p>
+        <p>Ringkasan pengguna, role, backup, dan kesehatan sistem.</p>
       </div>
 
       <section className="dashboardStats">
@@ -1008,18 +938,6 @@ function AdminDashboard({ setView }) {
               ))}
             </tbody>
           </table>
-        </article>
-
-        <article className="dashPanel notificationsPanel">
-          <PanelHeader title="Audit Terbaru" action="Lihat semua" onClick={() => setView("Audit Trail")} />
-          <div className="adminAuditList">
-            {recentAudits.map(([time, actor, module, action]) => (
-              <div className="adminAuditItem" key={`${time}-${action}`}>
-                <span><LineIcon name="clock" /></span>
-                <div><strong>{action}</strong><small>{time} - {actor} - {module}</small></div>
-              </div>
-            ))}
-          </div>
         </article>
 
         <article className="dashPanel trendPanel">
@@ -1883,212 +1801,7 @@ function PimpinanDispositionCreate({ onBack, setConfirm, sourceDetail = null }) 
   );
 }
 
-function ArchiveHome({ setConfirm }) {
-  const [archives, setArchives] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [sourceType, setSourceType] = useState("");
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [summary, setSummary] = useState({ total: 0, ajuan: 0, incoming: 0, disposition: 0 });
 
-  const loadArchives = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await api.getArchives({
-        page,
-        perPage: 10,
-        search,
-        source_type: sourceType
-      });
-      setArchives(result.data || []);
-      setTotalPages(Math.ceil((result.total || 0) / 10) || 1);
-      if (result.summary) {
-        setSummary(result.summary);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, search, sourceType]);
-
-  useEffect(() => {
-    loadArchives();
-  }, [loadArchives]);
-
-  const handleSync = () => {
-    setConfirm({
-      title: "Sinkronkan arsip otomatis?",
-      body: "Sistem akan mengambil data surat/ajuan/disposisi yang sudah selesai untuk masuk arsip.",
-      onConfirm: async () => {
-        try {
-          const result = await api.syncArchives();
-          setConfirm({
-            title: "Sinkronisasi Berhasil",
-            body: `${result.count} dokumen baru berhasil diarsipkan.`,
-          });
-          loadArchives();
-        } catch (err) {
-          setConfirm({
-            title: "Sinkronisasi Gagal",
-            body: err.message || "Gagal menyinkronkan arsip.",
-          });
-        }
-      }
-    });
-  };
-
-  const getSourceLabel = (type) => {
-    const map = {
-      letter_request: "Ajuan Surat",
-      incoming_letter: "Surat Masuk",
-      outgoing_letter: "Surat Keluar",
-      disposition: "Disposisi"
-    };
-    return map[type] || type;
-  };
-
-  const getCardActive = (label) => {
-    if (label === "Total Arsip" && sourceType === "") return "active";
-    if (label === "Ajuan Selesai" && sourceType === "letter_request") return "active";
-    if (label === "Surat Masuk" && sourceType === "incoming_letter") return "active";
-    if (label === "Disposisi" && sourceType === "disposition") return "active";
-    return "";
-  };
-
-  const handleCardClick = (label) => {
-    setPage(1);
-    if (label === "Total Arsip") setSourceType("");
-    else if (label === "Ajuan Selesai") setSourceType("letter_request");
-    else if (label === "Surat Masuk") setSourceType("incoming_letter");
-    else if (label === "Disposisi") setSourceType("disposition");
-  };
-
-  const archiveSummary = [
-    ["Total Arsip", String(summary.total), "Semua dokumen otomatis", "folder", "blue"],
-    ["Ajuan Selesai", String(summary.ajuan), "Masuk dari approval", "check", "green"],
-    ["Surat Masuk", String(summary.incoming), "Masuk setelah selesai", "mail", "purple"],
-    ["Disposisi", String(summary.disposition), "Tindak lanjut selesai", "clipboard", "orange"]
-  ];
-
-  return (
-    <section className="archivePage">
-      <header className="ajuanHeader">
-        <div>
-          <h1>Arsip Digital</h1>
-          <p>Arsip dibuat otomatis dari surat dan ajuan yang sudah selesai, tanpa upload dokumen ulang.</p>
-        </div>
-        <button className="newAjuanBtn" onClick={handleSync}>
-          <span><LineIcon name="refresh" /></span>
-          Sinkron Arsip
-        </button>
-      </header>
-
-      <section className="ajuanStatusGrid">
-        {archiveSummary.map(([label, value, meta, icon, tone]) => (
-          <button
-            type="button"
-            className={`ajuanStatusCard clickable ${tone} ${getCardActive(label)}`}
-            key={label}
-            onClick={() => handleCardClick(label)}
-            aria-label={`Filter arsip ${label}`}
-          >
-            <span className="icon3d">{iconSymbol(icon)}</span>
-            <div><small>{label}</small><strong>{value}</strong><p>{meta}</p></div>
-          </button>
-        ))}
-      </section>
-
-      <article className="ajuanHistory">
-        <div className="panelHeader">
-          <h3>Daftar Arsip Digital</h3>
-          <button onClick={() => { setSourceType(""); setSearch(""); setPage(1); }}>Semua arsip <span aria-hidden="true">-&gt;</span></button>
-        </div>
-        <div className="archiveNotice">
-          <LineIcon name="info" />
-          <span>Dokumen masuk arsip otomatis ketika status proses menjadi <strong>Disetujui</strong>, <strong>Dikirim</strong>, atau <strong>Selesai</strong>. Upload hanya opsional untuk lampiran pendukung.</span>
-        </div>
-
-        <div className="toolbar" style={{ marginBottom: "1rem" }}>
-          <input
-            value={search}
-            onChange={(event) => { setSearch(event.target.value); setPage(1); }}
-            placeholder="Cari nomor surat, perihal, atau status..."
-          />
-        </div>
-
-        {loading ? (
-          <div className="loadingContainer"><p>Memuat data arsip...</p></div>
-        ) : (
-          <>
-            <div className="tableScroll">
-              <table className="dashboardTable ajuanHistoryTable archiveTable">
-                <thead>
-                  <tr>
-                    <th>Nomor Surat</th>
-                    <th>Sumber</th>
-                    <th>Perihal</th>
-                    <th>Tanggal Arsip</th>
-                    <th>Metode</th>
-                    <th>Status</th>
-                    <th>Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {archives.length === 0 ? (
-                    <tr>
-                      <td colSpan="7" style={{ textAlign: "center", padding: "2rem" }}>Tidak ada data arsip.</td>
-                    </tr>
-                  ) : (
-                    archives.map((row) => (
-                      <tr key={row.id}>
-                        <td>{row.archive_number}</td>
-                        <td>{getSourceLabel(row.source_type)}</td>
-                        <td>{row.subject}</td>
-                        <td>
-                          {row.archived_at
-                            ? new Date(row.archived_at).toLocaleDateString("id-ID", {
-                                day: "numeric",
-                                month: "long",
-                                year: "numeric"
-                              })
-                            : "-"}
-                        </td>
-                        <td><span className="autoBadge">Otomatis</span></td>
-                        <td><Status text={row.status} /></td>
-                        <td>
-                          <button
-                            className="viewBtn"
-                            aria-label={`Lihat ${row.archive_number}`}
-                            onClick={() =>
-                              setConfirm({
-                                title: "Detail Arsip",
-                                body: `Nomor: ${row.archive_number}\nSumber: ${getSourceLabel(row.source_type)}\nPerihal: ${row.subject}\nTanggal: ${new Date(row.archived_at).toLocaleString("id-ID")}\nStatus: ${row.status}`
-                              })
-                            }
-                          >
-                            <LineIcon name="eye" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="pagination" style={{ marginTop: "1rem" }}>
-              <button className="ghostBtn" disabled={page === 1} onClick={() => setPage(page - 1)}>Sebelumnya</button>
-              <span>Halaman {page} dari {totalPages}</span>
-              <button className="ghostBtn" disabled={page === totalPages} onClick={() => setPage(page + 1)}>Berikutnya</button>
-            </div>
-          </>
-        )}
-      </article>
-    </section>
-  );
-}
 
 function AjuanSuratHome({ setConfirm, onCreateAjuan, currentUserName, ajuanRequests }) {
   const [statusFilter, setStatusFilter] = useState(null);
@@ -2726,99 +2439,7 @@ function getOutgoingLetterDetail(row) {
   };
 }
 
-function getAuditTrailDetail(row) {
-  const [time, actor, module, activity, log] = row;
-  if (log) {
-    let payloadArr = [];
-    const meta = log.payload || log.metadata;
-    if (meta) {
-      try {
-        if (typeof meta === "object") {
-          payloadArr = Object.entries(meta).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`);
-        } else {
-          payloadArr = [String(meta)];
-        }
-      } catch (e) {
-        payloadArr = ["Gagal mem-parse data payload"];
-      }
-    }
-    
-    return {
-      time,
-      actor,
-      module,
-      activity,
-      id: log.id,
-      date: new Date(log.created_at).toLocaleDateString("id-ID", {
-        timeZone: "Asia/Jakarta",
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric"
-      }),
-      ipAddress: log.ip_address || "127.0.0.1",
-      device: log.user_agent || "Browser / Client",
-      result: log.status || "success",
-      target: log.module,
-      description: log.activity,
-      payload: payloadArr,
-      notes: log.notes || "-",
-      review_status: log.review_status || null,
-      review_notes: log.review_notes || null,
-      reviewed_at: log.reviewed_at ? new Date(log.reviewed_at).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" }) : null,
-      reviewed_by_name: log.reviewer_name || log.reviewed_by_name || null
-    };
-  }
 
-  const detailMap = {
-    "10:42 WIB-Rina Operator": {
-      id: "AUD-2026-0518-1042",
-      date: "18 Mei 2026",
-      ipAddress: "192.168.10.42",
-      device: "Chrome 124 / Windows",
-      result: "Berhasil",
-      target: "AG-2026-041",
-      description: "Operator meneruskan surat masuk ke portal pimpinan untuk proses review dan disposisi.",
-      payload: ["Status lama: Diregistrasi", "Status baru: Diteruskan", "Notifikasi pimpinan dibuat"]
-    },
-    "10:21 WIB-Budi Santoso": {
-      id: "AUD-2026-0518-1021",
-      date: "18 Mei 2026",
-      ipAddress: "192.168.10.18",
-      device: "Edge 124 / Windows",
-      result: "Berhasil",
-      target: "AJ-2026-0007",
-      description: "User mengirim ajuan surat tugas sehingga masuk antrean verifikasi operator.",
-      payload: ["Status lama: Draft", "Status baru: Ajuan Baru", "Lampiran tervalidasi"]
-    },
-    "09:55 WIB-Admin Sistem": {
-      id: "AUD-2026-0518-0955",
-      date: "18 Mei 2026",
-      ipAddress: "192.168.10.5",
-      device: "Chrome 124 / Windows",
-      result: "Berhasil",
-      target: "USR-003",
-      description: "Administrator mengubah status pengguna melalui modul manajemen user.",
-      payload: ["Role: User", "Status akun diperbarui", "Perubahan dicatat untuk audit"]
-    }
-  };
-  return {
-    time,
-    actor,
-    module,
-    activity,
-    ...(detailMap[`${time}-${actor}`] || {
-      id: "AUD-2026-0518-0000",
-      date: "18 Mei 2026",
-      ipAddress: "192.168.10.10",
-      device: "Browser / Windows",
-      result: "Berhasil",
-      target: module,
-      description: activity,
-      payload: ["Aktivitas tercatat", "Tidak ada anomali"]
-    })
-  };
-}
 
 function ModuleView({
   view,
@@ -3044,187 +2665,7 @@ function AdminUserCreate({ onCancel, onCreateUser }) {
   );
 }
 
-function AuditTrailDetail({ detail, onBack }) {
-  return (
-    <section className="incomingPage dispositionDetailPage">
-      <header className="dispositionCreateHeader">
-        <div>
-          <button type="button" className="backLink" onClick={onBack}><LineIcon name="arrowLeft" /> Kembali ke Audit Trail</button>
-          <h1>Detail Audit Trail</h1>
-          <p>Informasi lengkap aktivitas sistem untuk pemeriksaan administrator.</p>
-        </div>
-        <Status text={detail.result} />
-      </header>
 
-      <section className="dispositionCreateGrid">
-        <div className="dispositionMain">
-          <article className="dispositionSourceCard">
-            <div className="rowBetween">
-              <h2><LineIcon name="clock" /> Identitas Log</h2>
-              <span className="priority">{detail.id}</span>
-            </div>
-            <div className="dispositionSourceRows">
-              <DetailItem icon="calendar" label="Tanggal" value={detail.date} />
-              <DetailItem icon="clock" label="Waktu" value={detail.time} />
-              <DetailItem icon="user" label="User" value={detail.actor} />
-              <DetailItem icon="archive" label="Modul" value={detail.module} />
-              <DetailItem icon="info" label="Target Data" value={detail.target} />
-              <DetailItem icon="shield" label="Hasil" value={detail.result} />
-            </div>
-          </article>
-
-          <article className="dispositionFormCard">
-            <h2><LineIcon name="clipboard" /> Aktivitas</h2>
-            <div className="dispositionNoteBox">
-              <small>Aktivitas tercatat</small>
-              <strong>{detail.activity}</strong>
-              <p>{detail.description}</p>
-            </div>
-          </article>
-
-          <article className="dispositionFormCard">
-            <h2><LineIcon name="info" /> Perubahan Data</h2>
-            <div className="detailPillList">
-              {detail.payload.map((item) => <span key={item}>{item}</span>)}
-            </div>
-          </article>
-        </div>
-
-        <aside className="dispositionPreview">
-          <h3>Konteks Akses</h3>
-          <div className="backupStatusRows">
-            <span>IP Address <b>{detail.ipAddress}</b></span>
-            <span>Perangkat <b>{detail.device}</b></span>
-            <span>Zona Waktu <b>Asia/Jakarta</b></span>
-          </div>
-          <div className="followupResultBox">
-            <span><LineIcon name="shield" /></span>
-            <strong>Log terlindungi</strong>
-            <p>Audit trail bersifat read-only dan dipakai untuk pelacakan aktivitas penting sistem.</p>
-          </div>
-        </aside>
-      </section>
-    </section>
-  );
-}
-
-function AuditTrailReview({ detail, onBack, setConfirm, onSaveSuccess }) {
-  const [status, setStatus] = useState(detail.review_status || "valid");
-  const [notes, setNotes] = useState(detail.review_notes || "");
-
-  const handleSave = async () => {
-    try {
-      await api.reviewAuditLog(detail.id, status, notes);
-      onSaveSuccess?.();
-    } catch (e) {
-      alert("Gagal menyimpan tinjauan audit: " + e.message);
-    }
-  };
-
-  const confirmSave = () => {
-    setConfirm({
-      title: "Simpan tinjauan audit?",
-      body: `${detail.id} akan ditandai sudah diperiksa dan catatan administrator dicatat di audit trail.`,
-      onConfirm: handleSave
-    });
-  };
-
-  return (
-    <section className="incomingPage dispositionDetailPage">
-      <header className="dispositionCreateHeader">
-        <div>
-          <button type="button" className="backLink" onClick={onBack}><LineIcon name="arrowLeft" /> Kembali ke Audit Trail</button>
-          <h1>Proses Audit Trail</h1>
-          <p>Tinjau aktivitas, beri catatan administrator, dan tandai log sebagai sudah diperiksa.</p>
-        </div>
-        <Status text={detail.result} />
-      </header>
-
-      <section className="dispositionCreateGrid">
-        <div className="dispositionMain">
-          <article className="dispositionSourceCard">
-            <div className="rowBetween">
-              <h2><LineIcon name="shield" /> Log yang Ditinjau</h2>
-              <span className="priority">{detail.module}</span>
-            </div>
-            <div className="dispositionSourceRows">
-              <DetailItem icon="info" label="ID Audit" value={detail.id} />
-              <DetailItem icon="user" label="User" value={detail.actor} />
-              <DetailItem icon="clock" label="Waktu" value={`${detail.date}, ${detail.time}`} />
-              <DetailItem icon="archive" label="Target Data" value={detail.target} />
-            </div>
-          </article>
-
-          <form className="dispositionForm" onSubmit={(event) => event.preventDefault()}>
-            <section className="dispositionFormCard">
-              <h2><LineIcon name="clipboard" /> Catatan Pemeriksaan</h2>
-              <div className="dispositionNoteBox">
-                <small>Aktivitas</small>
-                <strong>{detail.activity}</strong>
-                <p>{detail.description}</p>
-                {detail.payload && detail.payload.length > 0 && (
-                  <div style={{ marginTop: "10px" }}>
-                    <small style={{ display: "block", marginBottom: "4px" }}>Payload Details:</small>
-                    <ul style={{ paddingLeft: "16px", margin: 0, fontSize: "0.9em", color: "#666" }}>
-                      {detail.payload.map((p, idx) => <li key={idx}>{p}</li>)}
-                    </ul>
-                  </div>
-                )}
-              </div>
-              <label className="dispositionTextArea">
-                Catatan Administrator
-                <textarea
-                  rows={5}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Tuliskan hasil pemeriksaan, anomali, atau tindak lanjut keamanan bila diperlukan."
-                />
-              </label>
-            </section>
-
-            <section className="dispositionFormCard dispositionMetaForm">
-              <label>
-                Status Pemeriksaan
-                <select value={status} onChange={(e) => setStatus(e.target.value)}>
-                  <option value="valid">Valid</option>
-                  <option value="perlu_tindak_lanjut">Perlu Tindak Lanjut</option>
-                  <option value="anomali">Anomali</option>
-                </select>
-              </label>
-              <label>
-                Reviewer
-                <input value={detail.reviewed_by_name || detail.actor || "Admin Sistem"} readOnly />
-              </label>
-            </section>
-
-            {detail.reviewed_at && (
-              <section className="dispositionFormCard">
-                <h2><LineIcon name="check" /> Riwayat Review</h2>
-                <p style={{ margin: 0, fontSize: "0.95em" }}>
-                  Ditinjau oleh <strong>{detail.reviewed_by_name || "Admin"}</strong> pada {detail.reviewed_at}
-                </p>
-              </section>
-            )}
-
-            <div className="dispositionSubmitBar">
-              <button type="button" className="softBtn" onClick={() => setConfirm({ title: "Export bukti audit?", body: `Ringkasan ${detail.id} akan dibuat untuk kebutuhan pemeriksaan.` })}><LineIcon name="upload" /> Export Bukti</button>
-              <button type="button" className="primaryBtn" onClick={confirmSave}><LineIcon name="check" /> Simpan Tinjauan</button>
-            </div>
-          </form>
-        </div>
-
-        <aside className="dispositionPreview">
-          <h3>Checklist Audit</h3>
-          <div className="dispositionFlow">
-            {["Cek user dan waktu", "Validasi modul target", "Tinjau perubahan data", "Simpan catatan"].map((item, index) => (
-              <p key={item}><b>{index + 1}</b>{item}</p>
-            ))}
-          </div>
-        </aside>
-      </section>
-    </section>
-  );
-}
 
 function PimpinanDispositionDetail({ detail, onBack }) {
   return (
@@ -3948,153 +3389,7 @@ function createSimplePdf(title, lines) {
   return pdf;
 }
 
-function Reports({ setConfirm }) {
-  const [filters, setFilters] = useState({
-    start: "2026-05-01",
-    end: "2026-06-30",
-    type: "Surat Masuk",
-    status: "Semua Status"
-  });
-  const [reportData, setReportData] = useState({ heads: [], rows: [] });
-  const [loading, setLoading] = useState(false);
 
-  const loadReport = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await api.getReports({
-        start: filters.start,
-        end: filters.end,
-        type: filters.type,
-        status: filters.status
-      });
-      const heads = {
-        "Surat Masuk": ["Agenda", "Nomor Surat", "Pengirim", "Perihal", "Status"],
-        "Surat Keluar": ["Nomor", "Jenis", "Tujuan", "Perihal", "Status"],
-        "Ajuan Surat": ["Nomor", "Jenis", "Pengaju", "Perihal", "Status"],
-        Disposisi: ["ID", "Nomor Surat", "Tujuan", "Instruksi", "Status"]
-      };
-      setReportData({
-        heads: heads[filters.type] || heads["Surat Masuk"],
-        rows: result.rows || []
-      });
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [filters]);
-
-  useEffect(() => {
-    loadReport();
-  }, [loadReport]);
-
-  const total = reportData.rows.length;
-  const completed = reportData.rows.filter((row) => ["Selesai", "Disetujui", "Dikirim", "Didisposisikan"].includes(row[row.length - 1])).length;
-  const inProgress = reportData.rows.filter((row) => ["Diproses", "Diteruskan", "Menunggu Approval", "Diregistrasi", "Ditindaklanjuti", "Diterima"].includes(row[row.length - 1])).length;
-  const rejected = reportData.rows.filter((row) => ["Ditolak", "Dikembalikan"].includes(row[row.length - 1])).length;
-  const updateFilter = (key) => (event) => setFilters((current) => ({ ...current, [key]: event.target.value }));
-  const filenameBase = `laporan-${filters.type.toLowerCase().replaceAll(" ", "-")}-${filters.start}-${filters.end}`;
-
-  const exportExcel = () => {
-    const tableRows = [
-      reportData.heads,
-      ...reportData.rows
-    ].map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
-    const html = `<html><head><meta charset="utf-8" /></head><body><h2>Laporan Operasional</h2><p>Periode: ${escapeHtml(filters.start)} s/d ${escapeHtml(filters.end)}</p><p>Jenis: ${escapeHtml(filters.type)} | Status: ${escapeHtml(filters.status)}</p><table border="1">${tableRows}</table></body></html>`;
-    downloadBlob(`${filenameBase}.xls`, html, "application/vnd.ms-excel;charset=utf-8");
-  };
-
-  const exportPdf = () => {
-    const lines = [
-      `Periode: ${filters.start} s/d ${filters.end}`,
-      `Jenis: ${filters.type}`,
-      `Status: ${filters.status}`,
-      `Total Dokumen: ${total}`,
-      `Selesai: ${completed}`,
-      `Diproses: ${inProgress}`,
-      `Ditolak: ${rejected}`,
-      "",
-      reportData.heads.join(" | "),
-      ...reportData.rows.map((row) => row.join(" | "))
-    ];
-    downloadBlob(`${filenameBase}.pdf`, createSimplePdf("Laporan Operasional E-Office", lines), "application/pdf");
-  };
-
-  return (
-    <section className="tableShell">
-      <div className="rowBetween">
-        <h3>Laporan Operasional</h3>
-        <div className="actions">
-          <button className="softBtn" onClick={exportPdf}>Export PDF</button>
-          <button className="softBtn" onClick={exportExcel}>Export Excel</button>
-        </div>
-      </div>
-      <div className="formGrid">
-        <label>Periode Mulai<input type="date" value={filters.start} onChange={updateFilter("start")} /></label>
-        <label>Periode Selesai<input type="date" value={filters.end} onChange={updateFilter("end")} /></label>
-        <label>Jenis Laporan</label>
-        <select value={filters.type} onChange={updateFilter("type")}>
-          <option>Surat Masuk</option>
-          <option>Surat Keluar</option>
-          <option>Ajuan Surat</option>
-          <option>Disposisi</option>
-        </select>
-        <label>Status</label>
-        <select value={filters.status} onChange={updateFilter("status")}>
-          <option>Semua Status</option>
-          <option>Diproses</option>
-          <option>Diteruskan</option>
-          <option>Menunggu Approval</option>
-          <option>Disetujui</option>
-          <option>Dikirim</option>
-          <option>Selesai</option>
-          <option>Ditolak</option>
-        </select>
-      </div>
-      <div className="statsGrid compact" style={{ marginBottom: "1.5rem" }}>
-        <article className="statCard"><span>Total Dokumen</span><strong>{total}</strong></article>
-        <article className="statCard"><span>Selesai</span><strong>{completed}</strong></article>
-        <article className="statCard"><span>Diproses</span><strong>{inProgress}</strong></article>
-        <article className="statCard"><span>Ditolak</span><strong>{rejected}</strong></article>
-      </div>
-
-      {loading ? (
-        <div className="loadingContainer"><p>Memuat laporan...</p></div>
-      ) : (
-        <div className="tableScroll">
-          <table className="dashboardTable ajuanHistoryTable reportsTable">
-            <thead>
-              <tr>
-                {reportData.heads.map((h, i) => (
-                  <th key={i}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {reportData.rows.length === 0 ? (
-                <tr>
-                  <td colSpan={reportData.heads.length || 1} style={{ textAlign: "center", padding: "2rem" }}>
-                    Tidak ada data ditemukan untuk filter ini.
-                  </td>
-                </tr>
-              ) : (
-                reportData.rows.map((row, index) => (
-                  <tr key={index}>
-                    {row.map((cell, idx) => (
-                      <td key={idx}>
-                        {idx === row.length - 1 ? <Status text={cell} /> : cell}
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
-}
 
 function AdminBackup({ setConfirm }) {
   const [backups, setBackups] = useState([]);
