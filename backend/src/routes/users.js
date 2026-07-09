@@ -10,18 +10,53 @@ usersRouter.get("/", requireAuth, requireRole("administrator"), async (request, 
     const page = Math.max(Number(request.query.page || 1), 1);
     const perPage = Math.min(Math.max(Number(request.query.perPage || 10), 1), 100);
     const offset = (page - 1) * perPage;
+    const { search = "", role = "", status = "" } = request.query;
+
+    const conditions = ["users.deleted_at IS NULL"];
+    const values = [];
+    let paramIndex = 1;
+
+    if (search) {
+      conditions.push(`(users.full_name ILIKE $${paramIndex} OR users.username ILIKE $${paramIndex} OR users.email ILIKE $${paramIndex})`);
+      values.push(`%${search}%`);
+      paramIndex++;
+    }
+
+    if (role) {
+      conditions.push(`roles.name ILIKE $${paramIndex}`);
+      values.push(`%${role}%`);
+      paramIndex++;
+    }
+
+    if (status) {
+      conditions.push(`users.status = $${paramIndex}`);
+      values.push(status.toLowerCase());
+      paramIndex++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const countResult = await query(`
+      SELECT COUNT(*) 
+      FROM users 
+      JOIN roles ON roles.id = users.role_id 
+      ${whereClause}
+    `, values);
+    const totalCount = parseInt(countResult.rows[0].count, 10);
+
+    const dataValues = [...values, perPage, offset];
     const result = await query(
       `SELECT users.id, users.full_name, users.username, users.email, users.position, users.status,
               roles.name AS role, units.name AS unit
        FROM users
        JOIN roles ON roles.id = users.role_id
        LEFT JOIN units ON units.id = users.unit_id
-       WHERE users.deleted_at IS NULL
+       ${whereClause}
        ORDER BY users.created_at DESC
-       LIMIT $1 OFFSET $2`,
-      [perPage, offset]
+       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+      dataValues
     );
-    response.json({ data: result.rows, meta: { page, perPage } });
+    response.json({ data: result.rows, meta: { page, perPage, totalCount, totalPages: Math.ceil(totalCount / perPage) } });
   } catch (error) {
     next(error);
   }
@@ -84,6 +119,11 @@ usersRouter.post("/", requireAuth, requireRole("administrator"), async (request,
     response.status(201).json({ data: user });
   } catch (error) {
     if (error.code === "23505") {
+      if (error.constraint === "users_username_key") {
+        return response.status(409).json({ message: "Username sudah digunakan oleh akun lain." });
+      } else if (error.constraint === "users_email_key") {
+        return response.status(409).json({ message: "Email sudah digunakan oleh akun lain." });
+      }
       return response.status(409).json({ message: "Username atau email sudah digunakan." });
     }
     next(error);
@@ -176,6 +216,11 @@ usersRouter.put("/:id", requireAuth, async (request, response, next) => {
     response.json({ data: user });
   } catch (error) {
     if (error.code === "23505") {
+      if (error.constraint === "users_username_key") {
+        return response.status(409).json({ message: "Username sudah digunakan oleh akun lain." });
+      } else if (error.constraint === "users_email_key") {
+        return response.status(409).json({ message: "Email sudah digunakan oleh akun lain." });
+      }
       return response.status(409).json({ message: "Email sudah digunakan oleh akun lain." });
     }
     next(error);
@@ -263,6 +308,49 @@ usersRouter.post("/:id/reset-password", requireAuth, requireRole("administrator"
     });
 
     response.json({ message: `Password untuk ${user.full_name} berhasil direset.` });
+  } catch (error) {
+    next(error);
+  }
+});
+
+usersRouter.patch("/:id/toggle-status", requireAuth, requireRole("administrator"), async (request, response, next) => {
+  try {
+    const { id } = request.params;
+    if (id === request.user.id) {
+      return response.status(400).json({ message: "Anda tidak dapat mengubah status akun Anda sendiri di sini." });
+    }
+
+    const user = await withTransaction(async (client) => {
+      const userCheck = await client.query("SELECT id, full_name, status FROM users WHERE id = $1 AND deleted_at IS NULL", [id]);
+      if (!userCheck.rows[0]) {
+        const error = new Error("User tidak ditemukan.");
+        error.status = 404;
+        throw error;
+      }
+      
+      const newStatus = userCheck.rows[0].status === "aktif" ? "nonaktif" : "aktif";
+
+      const updateResult = await client.query(
+        `UPDATE users
+         SET status = $1,
+             updated_at = now()
+         WHERE id = $2
+         RETURNING id, full_name, status`,
+        [newStatus, id]
+      );
+      return updateResult.rows[0];
+    });
+
+    await writeAuditLog({
+      userId: request.user.id,
+      activity: "toggle_user_status",
+      module: "users",
+      dataId: user.id,
+      dataLabel: user.full_name,
+      request
+    });
+
+    response.json({ data: user });
   } catch (error) {
     next(error);
   }

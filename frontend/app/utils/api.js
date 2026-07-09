@@ -112,6 +112,12 @@ export const api = {
     });
   },
 
+  async toggleUserStatus(id) {
+    return request(`/users/${id}/toggle-status`, {
+      method: "PATCH",
+    });
+  },
+
   async resetPassword(id, password) {
     return request(`/users/${id}/reset-password`, {
       method: "POST",

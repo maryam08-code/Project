@@ -83,7 +83,7 @@ const tableHeads = {
   Disposisi: ["ID", "Nomor Surat", "Tujuan", "Instruksi", "Status"],
   "Konsep Surat": ["Nomor", "Jenis", "Perihal", "Pengaju", "Status"],
   "Status Ajuan": ["Nomor", "Jenis", "Perihal", "Pengaju", "Status"],
-  Pengguna: ["ID", "Nama", "Role", "Unit Kerja", "Status"]
+  Pengguna: ["Username", "Nama", "Role", "Unit Kerja", "Status"]
 };
 
 const initialAjuanRequests = [
@@ -144,6 +144,8 @@ export default function Home() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [ajuanRequests, setAjuanRequests] = useState(initialAjuanRequests);
   const [userRows, setUserRows] = useState([]);
+  const [userParams, setUserParams] = useState({ page: 1, search: "", role: "", status: "" });
+  const [userMeta, setUserMeta] = useState({ totalPages: 1, totalCount: 0 });
   const [currentUser, setCurrentUser] = useState(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
@@ -160,21 +162,25 @@ export default function Home() {
 
   const loadUsers = useCallback(async () => {
     try {
-      const data = await api.getUsers({ perPage: 100 });
+      const data = await api.getUsers({ perPage: 10, ...userParams });
       if (data && data.data) {
         const mapped = data.data.map(u => [
-          u.id,
+          u.username,
           u.full_name,
           u.role,
           u.unit || "-",
-          u.status === "aktif" ? "Aktif" : "Nonaktif"
+          u.status === "aktif" ? "Aktif" : "Nonaktif",
+          u.id,
+          u.email || "-",
+          u.position || "-"
         ]);
         setUserRows(mapped);
+        if (data.meta) setUserMeta(data.meta);
       }
     } catch (e) {
       console.error("Gagal memuat pengguna", e);
     }
-  }, []);
+  }, [userParams]);
 
   useEffect(() => {
     async function loadMe() {
@@ -323,9 +329,19 @@ export default function Home() {
     try {
       await api.deleteUser(id);
       loadUsers();
-      setConfirm({ title: "User terhapus", body: `${name} telah berhasil dinonaktifkan.` });
+      setConfirm({ title: "User terhapus", body: `${name} telah dihapus dari sistem.` });
     } catch (error) {
       setConfirm({ title: "Gagal menghapus", body: error.message });
+    }
+  };
+
+  const handleToggleUserStatus = async (id, name, currentStatus) => {
+    try {
+      await api.toggleUserStatus(id);
+      loadUsers();
+      setConfirm({ title: "Status diperbarui", body: `Status ${name} sekarang menjadi ${currentStatus === "Aktif" ? "Nonaktif" : "Aktif"}.` });
+    } catch (error) {
+      setConfirm({ title: "Gagal memperbarui", body: error.message });
     }
   };
 
@@ -521,6 +537,10 @@ export default function Home() {
               onUserDelete={handleDeleteUser}
               onUserResetPassword={handleResetPassword}
               onUserUpdate={updateUser}
+              onUserToggleStatus={handleToggleUserStatus}
+              userParams={userParams}
+              setUserParams={setUserParams}
+              userMeta={userMeta}
             />
           )}
         </section>
@@ -2467,7 +2487,11 @@ function ModuleView({
   onUserDelete,
   onUserResetPassword,
   onUserUpdate,
-  onAuditReviewSuccess
+  onUserToggleStatus,
+  onAuditReviewSuccess,
+  userParams,
+  setUserParams,
+  userMeta
 }) {
   const [openForms, setOpenForms] = useState({});
   const [editUser, setEditUser] = useState(null);
@@ -2477,6 +2501,7 @@ function ModuleView({
   const sourceRows = view === "Pengguna" ? userRows : view === "Audit Trail" ? (auditRows || []) : (rows[view] || rows["Ajuan Surat"]);
   
   const data = useMemo(() => {
+    if (view === "Pengguna") return sourceRows; // Already filtered by backend
     return sourceRows.filter((row) => {
       const stringified = row.map(cell => {
         if (typeof cell === "object" && cell !== null) return "";
@@ -2484,7 +2509,7 @@ function ModuleView({
       }).join(" ");
       return stringified.toLowerCase().includes(query.toLowerCase());
     });
-  }, [query, sourceRows]);
+  }, [query, sourceRows, view]);
 
   const readOnlyList = view === "Disposisi" || view === "Audit Trail";
   const formVisible = !readOnlyList && view !== "Pengguna" && (view !== "Surat Keluar" || openForms[view]);
@@ -2573,27 +2598,31 @@ function ModuleView({
           <h3>{view === "Disposisi" ? "Monitoring Disposisi" : view}</h3>
           {!readOnlyList && <button className="primaryBtn" onClick={handleAddData}>{view === "Pengguna" ? "Add User" : "Tambah Data"}</button>}
         </div>
-        {view !== "Audit Trail" && <Filters query={query} setQuery={setQuery} />}
+        {view !== "Audit Trail" && <Filters view={view} query={query} setQuery={setQuery} userParams={userParams} setUserParams={setUserParams} />}
         <DataTable
           heads={tableHeads[view]}
           data={data}
           setConfirm={setConfirm}
           view={view}
+          userMeta={userMeta}
+          userParams={userParams}
+          setUserParams={setUserParams}
           onDetail={view === "Disposisi" ? (row) => setDispositionAction({ mode: "detail", row }) : view === "Surat Keluar" ? (row) => setOutgoingAction({ mode: "detail", row }) : null}
           onProcess={view === "Disposisi" ? (row) => setDispositionAction({ mode: "process", row }) : view === "Surat Keluar" ? (row) => setOutgoingAction({ mode: "process", row }) : null}
           onAuditDetail={view === "Audit Trail" ? (row) => setAuditAction({ mode: "detail", row }) : null}
           onAuditReview={view === "Audit Trail" ? (row) => setAuditAction({ mode: "review", row }) : null}
           onUserEdit={view === "Pengguna" ? (row) => setEditUser({
-            id: row[0],
+            id: row[5],
             name: row[1],
-            username: row[2],
-            email: row[3] === "-" ? "" : row[3],
-            jabatan: row[4] === "-" ? "" : row[4],
-            status: row[5],
-            role: row[6],
-            unit: row[7] === "-" ? "" : row[7]
+            role: row[2],
+            unit: row[3] === "-" ? "" : row[3],
+            status: row[4] === "Aktif" ? "Aktif" : "Nonaktif",
+            username: row[0],
+            email: row[6] === "-" ? "" : row[6],
+            jabatan: row[7] === "-" ? "" : row[7]
           }) : null}
           onUserDelete={onUserDelete}
+          onUserToggleStatus={onUserToggleStatus}
           onUserResetPassword={onUserResetPassword}
         />
       </article>
@@ -2866,7 +2895,32 @@ function PimpinanDispositionProcess({ detail, onBack, setConfirm }) {
   );
 }
 
-function Filters({ query, setQuery }) {
+function Filters({ view, query, setQuery, userParams, setUserParams }) {
+  if (view === "Pengguna") {
+    return (
+      <div className="toolbar">
+        <input 
+          value={userParams?.search || ""} 
+          onChange={(event) => setUserParams(prev => ({ ...prev, search: event.target.value, page: 1 }))} 
+          placeholder="Cari nama, username, email..." 
+        />
+        <select value={userParams?.role || ""} onChange={(e) => setUserParams(prev => ({ ...prev, role: e.target.value, page: 1 }))}>
+          <option value="">Semua Role</option>
+          <option value="Administrator">Administrator</option>
+          <option value="Operator">Operator</option>
+          <option value="Pimpinan">Pimpinan</option>
+          <option value="User">User</option>
+          <option value="Pegawai">Pegawai</option>
+        </select>
+        <select value={userParams?.status || ""} onChange={(e) => setUserParams(prev => ({ ...prev, status: e.target.value, page: 1 }))}>
+          <option value="">Semua Status</option>
+          <option value="aktif">Aktif</option>
+          <option value="nonaktif">Nonaktif</option>
+        </select>
+      </div>
+    );
+  }
+
   return (
     <div className="toolbar">
       <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari nomor, perihal, pengirim..." />
@@ -2882,11 +2936,15 @@ function DataTable({
   data,
   setConfirm,
   view,
+  userMeta,
+  userParams,
+  setUserParams,
   onDetail,
   onProcess,
   onAuditDetail,
   onAuditReview,
   onUserDelete,
+  onUserToggleStatus,
   onUserResetPassword,
   onUserEdit
 }) {
@@ -2919,17 +2977,12 @@ function DataTable({
                         >
                           <LineIcon name="edit" />
                         </button>
-                        <button
-                          className="dangerSoftBtn"
-                          onClick={() =>
-                            setConfirm({
-                              title: "Hapus pengguna?",
-                              body: `${row[1]} akan dinonaktifkan menggunakan soft delete dan tidak dapat login.`,
-                              onConfirm: () => onUserDelete?.(row[0], row[1])
-                            })
-                          }
+                        <button 
+                          className="softBtn" 
+                          onClick={() => onUserToggleStatus ? onUserToggleStatus(row[5], row[1], row[4]) : null}
+                          title={row[4] === "Aktif" ? "Nonaktifkan Akun" : "Aktifkan Akun"}
                         >
-                          Hapus
+                          {row[4] === "Aktif" ? "Nonaktifkan" : "Aktifkan"}
                         </button>
                         <button
                           className="softBtn"
@@ -2937,11 +2990,25 @@ function DataTable({
                             setConfirm({
                               title: "Reset password?",
                               body: `Password awal baru untuk ${row[1]} akan dibuat dan aktivitas tercatat di audit trail.`,
-                              onConfirm: () => onUserResetPassword?.(row[0], row[1])
+                              onConfirm: () => onUserResetPassword?.(row[5], row[1])
                             })
                           }
+                          title="Reset Password"
                         >
-                          Reset Password
+                          Reset
+                        </button>
+                        <button
+                          className="dangerSoftBtn"
+                          onClick={() =>
+                            setConfirm({
+                              title: "Hapus pengguna?",
+                              body: `${row[1]} akan dihapus dari sistem menggunakan soft delete dan tidak dapat login.`,
+                              onConfirm: () => onUserDelete?.(row[5], row[1])
+                            })
+                          }
+                          title="Hapus Pengguna"
+                        >
+                          Hapus
                         </button>
                       </div>
                     ) : view === "Audit Trail" ? (
@@ -2959,10 +3026,41 @@ function DataTable({
                 </tr>
               );
             })}
+            {data.length === 0 && (
+              <tr>
+                <td colSpan={heads.length + 1} style={{ textAlign: "center", padding: "20px" }}>
+                  Data tidak ditemukan.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
-      <div className="pagination"><button className="ghostBtn">Sebelumnya</button><span>Halaman 1 dari 4</span><button className="ghostBtn">Berikutnya</button></div>
+      {view === "Pengguna" ? (
+        <div className="pagination">
+          <button 
+            className="ghostBtn" 
+            disabled={!userParams || userParams.page <= 1}
+            onClick={() => setUserParams(prev => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
+          >
+            Sebelumnya
+          </button>
+          <span>Halaman {userParams?.page || 1} dari {userMeta?.totalPages || 1}</span>
+          <button 
+            className="ghostBtn" 
+            disabled={!userMeta || !userParams || userParams.page >= userMeta.totalPages}
+            onClick={() => setUserParams(prev => ({ ...prev, page: Math.min(userMeta.totalPages, prev.page + 1) }))}
+          >
+            Berikutnya
+          </button>
+        </div>
+      ) : (
+        <div className="pagination">
+          <button className="ghostBtn">Sebelumnya</button>
+          <span>Halaman 1 dari 4</span>
+          <button className="ghostBtn">Berikutnya</button>
+        </div>
+      )}
     </>
   );
 }
