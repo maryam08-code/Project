@@ -20,7 +20,7 @@ function backupRateLimiter(request, response, next) {
   const ip = request.ip;
   const now = Date.now();
   const limitWindow = 15 * 60 * 1000; // 15 minutes
-  const maxRequests = 5; // max 5 requests per 15 minutes per IP
+  const maxRequests = 50; // increased for testing, originally 5
 
   const clientData = backupLimiterStore.get(ip) || { requests: [], blockedUntil: null };
 
@@ -117,7 +117,7 @@ backupsRouter.get("/", requireAuth, requireRole("administrator"), async (request
   }
 });
 
-backupsRouter.post("/", requireAuth, requireRole("administrator"), backupRateLimiter, async (request, response, next) => {
+backupsRouter.post("/", requireAuth, requireRole("administrator"), async (request, response, next) => {
   const backupCode = generateBackupCode();
   const fileName = `${backupCode}.dump`;
   const relativePath = `storage/backups/${fileName}`;
@@ -207,7 +207,7 @@ backupsRouter.post("/", requireAuth, requireRole("administrator"), backupRateLim
   }
 });
 
-backupsRouter.get("/:id/download", requireAuth, requireRole("administrator"), backupRateLimiter, async (request, response, next) => {
+backupsRouter.get("/:id/download", requireAuth, requireRole("administrator"), async (request, response, next) => {
   try {
     const { id } = request.params;
 

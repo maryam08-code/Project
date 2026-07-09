@@ -21,8 +21,7 @@ const roleConfig = {
   },
   Administrator: {
     name: "Admin Sistem",
-    nav: ["Dashboard", "Pengguna", "Backup"],
-    stats: [["Pengguna", "48"], ["Role", "5"], ["Backup", "03:00"]]
+    nav: ["Dashboard", "Pengguna", "Backup"]
   },
   Pegawai: {
     name: "Sari Pegawai",
@@ -302,6 +301,24 @@ export default function Home() {
     }
   }
 
+  async function updateUser(id, user) {
+    try {
+      const payload = {
+        fullName: user.name,
+        email: user.email,
+        role: user.role,
+        unit: user.unit,
+        position: user.jabatan,
+        status: user.status === "Aktif" ? "aktif" : "nonaktif"
+      };
+      await api.updateUser(id, payload);
+      loadUsers();
+      setConfirm({ title: "User diperbarui", body: `Data ${user.name} berhasil diperbarui.` });
+    } catch (error) {
+      setConfirm({ title: "Gagal memperbarui", body: error.message });
+    }
+  }
+
   const handleDeleteUser = async (id, name) => {
     try {
       await api.deleteUser(id);
@@ -503,6 +520,7 @@ export default function Home() {
               onCreateUser={createUser}
               onUserDelete={handleDeleteUser}
               onUserResetPassword={handleResetPassword}
+              onUserUpdate={updateUser}
             />
           )}
         </section>
@@ -2448,9 +2466,11 @@ function ModuleView({
   auditRows,
   onUserDelete,
   onUserResetPassword,
+  onUserUpdate,
   onAuditReviewSuccess
 }) {
   const [openForms, setOpenForms] = useState({});
+  const [editUser, setEditUser] = useState(null);
   const [dispositionAction, setDispositionAction] = useState(null);
   const [outgoingAction, setOutgoingAction] = useState(null);
   const [auditAction, setAuditAction] = useState(null);
@@ -2490,14 +2510,23 @@ function ModuleView({
     );
   }
 
-  if (view === "Pengguna" && openForms[view]) {
+  if (view === "Pengguna" && (openForms[view] || editUser)) {
     return (
       <AdminUserCreate
-        onCancel={() => setOpenForms((current) => ({ ...current, [view]: false }))}
+        initialData={editUser}
+        onCancel={() => {
+          setOpenForms((current) => ({ ...current, [view]: false }));
+          setEditUser(null);
+        }}
         setConfirm={setConfirm}
         onCreateUser={(user) => {
-          onCreateUser(user);
+          if (editUser) {
+            onUserUpdate(editUser.id, user);
+          } else {
+            onCreateUser(user);
+          }
           setOpenForms((current) => ({ ...current, [view]: false }));
+          setEditUser(null);
         }}
       />
     );
@@ -2554,6 +2583,16 @@ function ModuleView({
           onProcess={view === "Disposisi" ? (row) => setDispositionAction({ mode: "process", row }) : view === "Surat Keluar" ? (row) => setOutgoingAction({ mode: "process", row }) : null}
           onAuditDetail={view === "Audit Trail" ? (row) => setAuditAction({ mode: "detail", row }) : null}
           onAuditReview={view === "Audit Trail" ? (row) => setAuditAction({ mode: "review", row }) : null}
+          onUserEdit={view === "Pengguna" ? (row) => setEditUser({
+            id: row[0],
+            name: row[1],
+            username: row[2],
+            email: row[3] === "-" ? "" : row[3],
+            jabatan: row[4] === "-" ? "" : row[4],
+            status: row[5],
+            role: row[6],
+            unit: row[7] === "-" ? "" : row[7]
+          }) : null}
           onUserDelete={onUserDelete}
           onUserResetPassword={onUserResetPassword}
         />
@@ -2563,7 +2602,7 @@ function ModuleView({
   );
 }
 
-function AdminUserCreate({ onCancel, onCreateUser }) {
+function AdminUserCreate({ onCancel, onCreateUser, initialData }) {
   function saveUser(event) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -2575,7 +2614,7 @@ function AdminUserCreate({ onCancel, onCreateUser }) {
     const email = String(form.get("email") || "").trim();
     const password = String(form.get("password") || "").trim();
     const jabatan = String(form.get("jabatan") || "").trim();
-    if (!name || !role || !username || !password) return;
+    if (!name || !role || (!initialData && !username) || (!initialData && !password)) return;
     onCreateUser({ name, role, status, unit, username, email, password, jabatan });
   }
 
@@ -2584,8 +2623,8 @@ function AdminUserCreate({ onCancel, onCreateUser }) {
       <header className="dispositionCreateHeader">
         <div>
           <button type="button" className="backLink" onClick={onCancel}><LineIcon name="arrowLeft" /> Kembali ke Daftar Pengguna</button>
-          <h1>Add User</h1>
-          <p>Tambahkan akun pengguna baru dan atur role sesuai hak akses sistem.</p>
+          <h1>{initialData ? "Edit User" : "Add User"}</h1>
+          <p>{initialData ? "Ubah data akun pengguna." : "Tambahkan akun pengguna baru dan atur role sesuai hak akses sistem."}</p>
         </div>
       </header>
 
@@ -2595,17 +2634,19 @@ function AdminUserCreate({ onCancel, onCreateUser }) {
             <h2><LineIcon name="user" /> Informasi Akun</h2>
             <div className="adminUserFields">
               <label>Nama Lengkap <span>*</span>
-                <input name="name" placeholder="Masukkan nama lengkap" required />
+                <input name="name" placeholder="Masukkan nama lengkap" defaultValue={initialData?.name} required />
               </label>
               <label>Username <span>*</span>
-                <input name="username" placeholder="Contoh: operator2" required />
+                <input name="username" placeholder="Contoh: operator2" defaultValue={initialData?.username} required={!initialData} readOnly={!!initialData} style={initialData ? {opacity: 0.7} : {}} />
               </label>
               <label>Email
-                <input name="email" type="email" placeholder="nama@instansi.ac.id" />
+                <input name="email" type="email" placeholder="nama@instansi.ac.id" defaultValue={initialData?.email} />
               </label>
-              <label>Password Awal <span>*</span>
-                <input name="password" type="password" placeholder="Masukkan password awal" required />
-              </label>
+              {!initialData && (
+                <label>Password Awal <span>*</span>
+                  <input name="password" type="password" placeholder="Masukkan password awal" required />
+                </label>
+              )}
             </div>
           </article>
 
@@ -2613,7 +2654,7 @@ function AdminUserCreate({ onCancel, onCreateUser }) {
             <h2><LineIcon name="shield" /> Role dan Unit Kerja</h2>
             <div className="adminUserFields">
               <label>Role <span>*</span>
-                <select name="role" defaultValue="" required>
+                <select name="role" defaultValue={initialData?.role || ""} required>
                   <option value="" disabled>Pilih role</option>
                   <option>Administrator</option>
                   <option>Operator</option>
@@ -2623,16 +2664,16 @@ function AdminUserCreate({ onCancel, onCreateUser }) {
                 </select>
               </label>
               <label>Status <span>*</span>
-                <select name="status" defaultValue="Aktif">
+                <select name="status" defaultValue={initialData?.status || "Aktif"}>
                   <option>Aktif</option>
                   <option>Nonaktif</option>
                 </select>
               </label>
               <label>Jabatan
-                <input name="jabatan" placeholder="Contoh: Staf Administrasi" />
+                <input name="jabatan" placeholder="Contoh: Staf Administrasi" defaultValue={initialData?.jabatan} />
               </label>
               <label>Unit Kerja
-                <input name="unit" placeholder="Contoh: Tata Usaha" />
+                <input name="unit" placeholder="Contoh: Tata Usaha" defaultValue={initialData?.unit} />
               </label>
             </div>
           </article>
@@ -2846,7 +2887,8 @@ function DataTable({
   onAuditDetail,
   onAuditReview,
   onUserDelete,
-  onUserResetPassword
+  onUserResetPassword,
+  onUserEdit
 }) {
   return (
     <>
@@ -2870,6 +2912,13 @@ function DataTable({
                   <td>
                     {view === "Pengguna" ? (
                       <div className="actions userActions">
+                        <button
+                          className="viewBtn edit"
+                          onClick={() => onUserEdit?.(row)}
+                          title="Edit Pengguna"
+                        >
+                          <LineIcon name="edit" />
+                        </button>
                         <button
                           className="dangerSoftBtn"
                           onClick={() =>
