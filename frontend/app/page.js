@@ -132,11 +132,7 @@ const initialAjuanRequests = [
   { nomor: "AJ/2025/05/00124", jenis: "Surat Permohonan", pemohon: "Dewi Kartika", unit: "Keuangan", tanggal: "17 Mei 2025", status: "Perlu Verifikasi" }
 ];
 
-const initialUsers = [
-  ["USR-001", "Rina Operator", "Operator", "Tata Usaha", "Aktif"],
-  ["USR-002", "Dewi Pimpinan", "Pimpinan", "Kepala Bagian", "Aktif"],
-  ["USR-003", "Budi Santoso", "User", "Kepegawaian", "Aktif"]
-];
+const initialUsers = [];
 
 export default function Home() {
   const [loggedIn, setLoggedIn] = useState(false);
@@ -148,7 +144,7 @@ export default function Home() {
   const [confirm, setConfirm] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [ajuanRequests, setAjuanRequests] = useState(initialAjuanRequests);
-  const [userRows, setUserRows] = useState(initialUsers);
+  const [userRows, setUserRows] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
@@ -966,10 +962,9 @@ function AdminDashboard({ setView }) {
             <div className="donut adminDonut"><span><strong>98%</strong><small>Sehat</small></span></div>
             <div className="summaryRows">
               {[
-                ["Akun Aktif", "43 dari 48", "blue"],
-                ["Role Terpasang", "5 role", "purple"],
-                ["Backup Berhasil", "03:00 WIB", "orange"],
-                ["Audit Aman", "129 log hari ini", "gray"]
+                ["Akun Aktif", `${activeUsersCount} dari ${usersCount}`, "blue"],
+                ["Role Terpasang", "4 Role", "purple"],
+                ["Backup Terakhir", lastBackupText, "orange"]
               ].map(([label, value, tone]) => <p key={label}><i className={tone} />{label}<strong>{value}</strong></p>)}
               <button className="detailLink" onClick={() => setView("Backup")}>Buka backup -&gt;</button>
             </div>
