@@ -141,7 +141,7 @@ usersRouter.put("/:id", requireAuth, async (request, response, next) => {
       return response.status(403).json({ message: "Akses ditolak. Anda tidak memiliki izin untuk aksi ini." });
     }
 
-    const { fullName, email, role, unit, position, status } = request.body || {};
+    const { fullName, email, password, role, unit, position, status } = request.body || {};
     
     const requiredErrors = {};
     if (!fullName) requiredErrors.fullName = "Nama lengkap wajib diisi.";
@@ -197,10 +197,18 @@ usersRouter.put("/:id", requireAuth, async (request, response, next) => {
              email = NULLIF($4, ''),
              position = $5,
              status = $6,
+             password_hash = CASE
+               WHEN NULLIF(BTRIM($7), '') IS NOT NULL THEN crypt(BTRIM($7), gen_salt('bf'))
+               ELSE password_hash
+             END,
+             must_change_password = CASE
+               WHEN NULLIF(BTRIM($7), '') IS NOT NULL THEN true
+               ELSE must_change_password
+             END,
              updated_at = now()
-         WHERE id = $7 AND deleted_at IS NULL
+         WHERE id = $8 AND deleted_at IS NULL
          RETURNING id, full_name, username, email, position, status`,
-        [selectedRole.id, unitId, fullName, email || null, position || null, accountStatus, id]
+        [selectedRole.id, unitId, fullName, email || null, position || null, accountStatus, password || null, id]
       );
 
       return { ...updateResult.rows[0], role: selectedRole.name, unit: unit || null };

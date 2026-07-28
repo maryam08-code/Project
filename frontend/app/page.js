@@ -444,7 +444,7 @@ function mapApiAuditToRow(log) {
 const roleConfig = {
   User: {
     name: "Budi Santoso",
-    nav: ["Dashboard", "Ajuan Surat", "Disposisi Masuk"],
+    nav: ["Dashboard", "Ajuan Surat", "Disposisi Masuk", "Tembusan Surat"],
     stats: [["Total Ajuan", "18"], ["Diproses", "6"], ["Disetujui", "9"], ["Disposisi", "4"]]
   },
   Operator: {
@@ -1134,6 +1134,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
           body: JSON.stringify({
             fullName: user.name,
             email: user.email,
+            password: user.password,
             role: user.role,
             unit: user.unit,
             position: user.jabatan,
@@ -1399,6 +1400,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
             });
           }} />}
           {currentView === "Disposisi Masuk" && <DisposisiMasukHome setConfirm={setConfirm} />}
+          {currentView === "Tembusan Surat" && <DisposisiMasukHome setConfirm={setConfirm} viewMode="copy" />}
           {currentView === "Arsip" && <ArchiveHome ajuanRequests={ajuanRequests} outgoingLetters={outgoingLetters} />}
           {currentView === "Backup" && <AdminBackup setConfirm={setConfirm} />}
           {["Konsep Surat", "Status Ajuan", "Surat Keluar", "Disposisi", "Arsip Digital", "Pengguna", "Audit Trail"].includes(currentView) && (
@@ -5953,7 +5955,8 @@ function ClipboardIllustration() {
   );
 }
 
-function DisposisiMasukHome({ setConfirm }) {
+function DisposisiMasukHome({ setConfirm, viewMode = "disposition" }) {
+  const isCopyView = viewMode === "copy";
   const [statusFilter, setStatusFilter] = useState("Semua Status");
   const [typeFilter, setTypeFilter] = useState("Semua");
   const [dispositionQuery, setDispositionQuery] = useState("");
@@ -6000,23 +6003,30 @@ function DisposisiMasukHome({ setConfirm }) {
     };
   }, [setConfirm]);
   const pageSize = 3;
-  const inboxItems = [...dispositionItems, ...copyItems];
-  const summaryStats = [
+  const inboxItems = isCopyView ? copyItems : dispositionItems;
+  const dispositionStats = [
     ["Menunggu Tindak Lanjut", String(dispositionItems.filter((row) => row[5] === "Dikirim").length), "Disposisi perlu ditindaklanjuti", "clock", "orange", "Dikirim"],
     ["Diproses", String(dispositionItems.filter((row) => ["Diterima", "Ditindaklanjuti"].includes(row[5])).length), "Sedang dalam proses", "doc", "blue", "Diproses"],
-    ["Selesai", String(dispositionItems.filter((row) => row[5] === "Selesai").length), "Disposisi telah diselesaikan", "check", "green", "Selesai"],
-    ["Tembusan", String(copyItems.length), "Surat untuk diketahui", "mail", "purple", "Tembusan"]
+    ["Selesai", String(dispositionItems.filter((row) => row[5] === "Selesai").length), "Disposisi telah diselesaikan", "check", "green", "Selesai"]
   ];
+  const copyStats = [
+    ["Total Tembusan", String(copyItems.length), "Seluruh surat tembusan", "mail", "purple", "Semua Status"],
+    ["Belum Dibaca", String(copyItems.filter((row) => row[5] !== "Dibaca").length), "Perlu diketahui", "clock", "orange", "Belum Dibaca"],
+    ["Sudah Dibaca", String(copyItems.filter((row) => row[5] === "Dibaca").length), "Informasi telah dibaca", "check", "green", "Dibaca"]
+  ];
+  const summaryStats = isCopyView ? copyStats : dispositionStats;
   const filteredDispositions = inboxItems.filter((row) => {
     const rowType = row.detail?.kind || "Disposisi";
     const haystack = row.join(" ").toLowerCase();
     const matchesQuery = haystack.includes(dispositionQuery.toLowerCase());
-    const matchesStatus = statusFilter === "Semua Status" || rowType === "Tembusan"
+    const matchesStatus = statusFilter === "Semua Status"
       ? true
+      : isCopyView
+        ? statusFilter === "Belum Dibaca" ? row[5] !== "Dibaca" : row[5] === statusFilter
       : statusFilter === "Diproses"
         ? ["Diterima", "Ditindaklanjuti"].includes(row[5])
         : row[5] === statusFilter;
-    const matchesType = typeFilter === "Semua" || rowType === typeFilter;
+    const matchesType = isCopyView ? rowType === "Tembusan" : rowType === "Disposisi";
     return matchesQuery && matchesStatus && matchesType;
   });
   const totalPages = Math.max(1, Math.ceil(filteredDispositions.length / pageSize));
@@ -6362,21 +6372,15 @@ function DisposisiMasukHome({ setConfirm }) {
     <section className="disposisiPage userDispositionPage">
       <header className="userDispositionHeader">
         <div>
-          <h1>Disposisi Masuk</h1>
-          <p>Pantau instruksi pimpinan dan tindak lanjuti disposisi yang masuk.</p>
+          <h1>{isCopyView ? "Tembusan Surat" : "Disposisi Masuk"}</h1>
+          <p>{isCopyView ? "Baca surat tembusan yang dikirim untuk diketahui dan disimpan sebagai informasi." : "Pantau instruksi pimpinan dan tindak lanjuti disposisi yang masuk."}</p>
         </div>
       </header>
 
       <section className="userDispositionStats" aria-label="Ringkasan disposisi masuk">
         {summaryStats.map(([label, value, meta, icon, tone, targetStatus]) => (
           <button type="button" className={`userDispositionStat ${tone}`} key={label} onClick={() => {
-            if (targetStatus === "Tembusan") {
-              setTypeFilter("Tembusan");
-              setStatusFilter("Semua Status");
-            } else {
-              setTypeFilter("Disposisi");
-              setStatusFilter(targetStatus);
-            }
+            setStatusFilter(targetStatus);
           }}>
             <span><LineIcon name={icon} /></span>
             <div>
@@ -6391,28 +6395,14 @@ function DisposisiMasukHome({ setConfirm }) {
       <section className="userDispositionToolbar" aria-label="Pencarian dan filter surat masuk">
         <label className="userDispositionSearch">
           <LineIcon name="search" />
-          <input value={dispositionQuery} onChange={(event) => setDispositionQuery(event.target.value)} placeholder="Cari disposisi atau perihal..." />
+          <input value={dispositionQuery} onChange={(event) => setDispositionQuery(event.target.value)} placeholder={isCopyView ? "Cari nomor atau perihal tembusan..." : "Cari disposisi atau perihal..."} />
         </label>
-        <div className="userDispositionTypeFilters" role="group" aria-label="Filter jenis surat">
-          {[
-            ["Semua", "filter"],
-            ["Disposisi", "doc"],
-            ["Tembusan", "mail"]
-          ].map(([label, icon]) => (
-            <button type="button" className={typeFilter === label ? "active" : ""} key={label} onClick={() => {
-              setTypeFilter(label);
-              setStatusFilter("Semua Status");
-            }}>
-              <LineIcon name={icon} /> {label}
-            </button>
-          ))}
-        </div>
       </section>
 
       <section className="userDispositionGrid">
         <article className="disposisiList">
           <div className="userDispositionListHeader">
-            <h3>Daftar Disposisi &amp; Tembusan</h3>
+            <h3>{isCopyView ? "Daftar Tembusan Surat" : "Daftar Disposisi Masuk"}</h3>
           </div>
           <div className="userDispositionRows">
             {visibleDispositions.map((row) => {
@@ -6452,7 +6442,7 @@ function DisposisiMasukHome({ setConfirm }) {
             {filteredDispositions.length === 0 && (
               <div className="disposisiEmptyCard">
                 <strong>Tidak ada surat</strong>
-                <span>Ubah pencarian atau pilih Semua untuk melihat disposisi dan tembusan.</span>
+                <span>{isCopyView ? "Belum ada tembusan yang sesuai dengan pencarian." : "Belum ada disposisi yang sesuai dengan pencarian."}</span>
               </div>
             )}
           </div>
@@ -6500,17 +6490,13 @@ function DisposisiMasukHome({ setConfirm }) {
         ) : (
           <aside className="userDispositionSide">
             <article className="userDispositionDifference">
-              <h3>Perbedaan Disposisi dan Tembusan</h3>
-              <div className="userDispositionDifferenceItem disposition">
-                <span><LineIcon name="doc" /></span>
-                <div><strong>Disposisi</strong><small>Surat berisi instruksi atau tindakan yang perlu Anda laksanakan.</small></div>
-              </div>
-              <div className="userDispositionDifferenceItem copy">
-                <span><LineIcon name="mail" /></span>
-                <div><strong>Tembusan</strong><small>Surat yang diteruskan untuk diketahui atau disimpan sebagai informasi.</small></div>
+              <h3>{isCopyView ? "Tentang Tembusan Surat" : "Tentang Disposisi"}</h3>
+              <div className={`userDispositionDifferenceItem ${isCopyView ? "copy" : "disposition"}`}>
+                <span><LineIcon name={isCopyView ? "mail" : "doc"} /></span>
+                <div><strong>{isCopyView ? "Tembusan" : "Disposisi"}</strong><small>{isCopyView ? "Surat diteruskan untuk diketahui atau disimpan sebagai informasi dan tidak memerlukan tindak lanjut." : "Surat berisi instruksi atau tindakan yang perlu Anda laksanakan."}</small></div>
               </div>
             </article>
-            <article className="followupPanel">
+            {!isCopyView && <article className="followupPanel">
               <h3>Alur Tindak Lanjut Disposisi</h3>
               <div className="followupSteps">
                 {[
@@ -6521,7 +6507,7 @@ function DisposisiMasukHome({ setConfirm }) {
                   <div key={title}><b>{index + 1}</b><span><strong>{title}</strong><small>{body}</small></span></div>
                 ))}
               </div>
-            </article>
+            </article>}
           </aside>
         )}
       {previewDocument && <AttachmentPreviewModal attachment={previewDocument} detail={{ judul: "Dokumen Disposisi", keterangan: "Dokumen terkait disposisi." }} onClose={() => setPreviewDocument(null)} />}
@@ -6835,6 +6821,7 @@ function navIcon(item) {
     Dashboard: "dashboard",
     "Ajuan Surat": "send",
     "Disposisi Masuk": "mail",
+    "Tembusan Surat": "mail",
     "Konsep Surat": "doc",
     "Status Ajuan": "clipboard",
     "Ajuan Masuk": "inbox",
