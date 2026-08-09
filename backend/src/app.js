@@ -12,6 +12,7 @@ import { healthRouter } from "./routes/health.js";
 import { incomingLettersRouter } from "./routes/incoming-letters.js";
 import { metaRouter } from "./routes/meta.js";
 import { notificationsRouter } from "./routes/notifications.js";
+import publicRoutes from "./routes/publicRoutes.js"; // <-- 1. IMPORT DI SINI
 import { usersRouter } from "./routes/users.js";
 
 export function createApp() {
@@ -32,6 +33,7 @@ export function createApp() {
   app.use("/api/audit-logs", auditLogsRouter);
   app.use("/api/backups", backupsRouter);
   app.use("/api/email", emailRouter);
+  app.use("/api/public", publicRoutes); // <-- 2. DAFTARKAN ROUTE DI SINI
 
   app.use((_request, response) => {
     response.status(404).json({ message: "Data tidak ditemukan." });
