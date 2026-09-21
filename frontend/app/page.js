@@ -722,15 +722,17 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [ajuanRequests, setAjuanRequests] = useState(initialAjuanRequests);
   const [outgoingLetters, setOutgoingLetters] = useState(initialOutgoingLetters);
-  const [userRows, setUserRows] = useState(initialUsers);
+  const [userRows, setUserRows] = useState([]);
   const [auditRows, setAuditRows] = useState(rows["Audit Trail"]);
   const [apiNotice, setApiNotice] = useState("");
   const [localDataReady, setLocalDataReady] = useState(false);
   const [userParams, setUserParams] = useState({ page: 1, search: "", role: "", status: "" });
   const [userMeta, setUserMeta] = useState({ totalPages: 1, totalCount: 0 });
+  const userLoadId = useRef(0);
 
   const loadUsers = useCallback(async () => {
     if (isDummyToken()) return;
+    const loadId = ++userLoadId.current;
     try {
       const params = new URLSearchParams({
         page: String(userParams.page),
@@ -740,14 +742,16 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
         status: userParams.status
       });
       const usersPayload = await apiFetch(`/users?${params.toString()}`);
+      if (loadId !== userLoadId.current) return;
       if (usersPayload && usersPayload.data) {
         setUserRows((usersPayload.data || []).map(mapApiUserToRow));
         if (usersPayload.meta) {
           setUserMeta(usersPayload.meta);
         }
+        setApiNotice("");
       }
     } catch (e) {
-      console.error("Gagal memuat pengguna", e);
+      if (loadId === userLoadId.current) setApiNotice(`Gagal memuat pengguna: ${e.message}`);
     }
   }, [userParams]);
 
@@ -781,7 +785,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
       if (cancelled) return;
       setAjuanRequests(normalizeAjuanWorkflowStatus(hydratedAjuan));
       setOutgoingLetters(normalizeOutgoingWorkflowStatus(hydratedOutgoing));
-      setUserRows(readLocalJson(LOCAL_USERS_KEY, initialUsers));
+      if (isDummyToken()) setUserRows(readLocalJson(LOCAL_USERS_KEY, initialUsers));
       setLocalDataReady(true);
     }
 
@@ -835,17 +839,12 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     let ignore = false;
 
     async function loadAdminData() {
-      if (!loggedIn || role !== "Administrator" || isDummyToken()) return;
+      if (!localDataReady || authLoading || !loggedIn || role !== "Administrator" || isDummyToken()) return;
 
       try {
-        const [usersPayload, auditPayload] = await Promise.all([
-          apiFetch("/users?perPage=50"),
-          apiFetch("/audit-logs?perPage=20")
-        ]);
+        const auditPayload = await apiFetch("/audit-logs?perPage=20");
         if (ignore) return;
-        setUserRows((usersPayload.data || []).map(mapApiUserToRow));
         setAuditRows((auditPayload.data || []).map(mapApiAuditToRow));
-        setApiNotice("");
       } catch (error) {
         if (!ignore) setApiNotice(error.message);
       }
@@ -855,7 +854,13 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     return () => {
       ignore = true;
     };
-  }, [loggedIn, role]);
+  }, [loggedIn, role, localDataReady, authLoading]);
+
+  useEffect(() => {
+    if (!localDataReady || authLoading || !loggedIn || role !== "Administrator" || isDummyToken()) return;
+    loadUsers();
+    return () => { userLoadId.current += 1; };
+  }, [localDataReady, authLoading, loggedIn, role, loadUsers]);
 
   useEffect(() => {
     let ignore = false;
@@ -1096,7 +1101,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
             status: user.status
           })
         });
-        setUserRows((current) => [mapApiUserToRow(payload.data), ...current]);
+        await loadUsers();
         setConfirm({ title: "User tersimpan", body: `${user.name} sudah disimpan ke database dan audit trail dicatat.` });
         return true;
       } catch (error) {
@@ -6478,9 +6483,10 @@ function AdminUserManagement({
   const isDummyMode = isDummyToken();
 
   const displayRows = useMemo(() => {
+    if (!isDummyMode) return rows;
     const hasSuperAdmin = rows.some((row) => String(row[1] || "").toLowerCase() === "super admin");
     return hasSuperAdmin ? rows : [["USR-000", "Super Admin", "Administrator", "Pusat", "Aktif", "admin@sttpu.ac.id", { id: "dummy-admin", username: "admin" }], ...rows];
-  }, [rows]);
+  }, [rows, isDummyMode]);
 
   const filteredRows = useMemo(() => {
     if (!isDummyMode) return displayRows;
@@ -7676,7 +7682,7 @@ function AdminUserCreate({ onCancel, onCreateUser, initialData }) {
     const role = String(form.get("role") || "").trim();
     const status = String(form.get("status") || "Aktif").trim();
     const unit = String(form.get("unit") || "").trim();
-    const jabatan = String(form.get("jabatan") || "").trim();
+    const jabatan = initialData?.jabatan || "";
     if (!name || (!isEdit && (!username || !password)) || !role || !unit) return;
     setSaving(true);
     try {
@@ -7736,9 +7742,6 @@ function AdminUserCreate({ onCancel, onCreateUser, initialData }) {
               </label>
               <label>Unit Kerja <span>*</span>
                 <input name="unit" defaultValue={initialData?.unit || ""} placeholder="Contoh: Tata Usaha" required />
-              </label>
-              <label>Jabatan
-                <input name="jabatan" defaultValue={initialData?.jabatan || ""} placeholder="Contoh: Staf Administrasi" />
               </label>
             </div>
           </article>
