@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ownedRequests, activitySummary } from "./utils/user-activity.mjs";
+import { userProfile } from "./utils/user-profile.mjs";
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api").replace(/\/$/, "");
 const AUTH_TOKEN_KEY = "eoffice_auth_token";
@@ -50,11 +52,6 @@ const dummyLoginUsers = [
     user: { id: "dummy-user", full_name: "Budi Santoso", username: "user", email: "user@e-office.local", role_code: "user", role_name: "User", status: "aktif" }
   }
 ];
-
-function findDummyLogin(username, password) {
-  const loginUsername = String(username || "").trim().toLowerCase();
-  return dummyLoginUsers.find((account) => account.username === loginUsername && account.password === password);
-}
 
 function getStoredToken() {
   if (typeof window === "undefined") return "";
@@ -315,7 +312,7 @@ function isRemovedAjuanRequest(request) {
 
 function getAjuanIdentityKey(request) {
   return [
-    request?.pemohon || "",
+    request?.ownerId || request?.pemohon || "",
     request?.jenis || "",
     request?.judul || request?.keterangan || "",
     request?.tujuan || ""
@@ -372,8 +369,9 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
     });
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error("Backend lokal tidak merespons. Silakan coba lagi atau gunakan akun dummy.");
+      throw new Error("Server tidak merespons. Pastikan backend dan database berjalan, lalu coba lagi.");
     }
+    if (error instanceof TypeError) throw new Error("Tidak dapat terhubung ke server. Pastikan backend berjalan, lalu coba lagi.");
     throw error;
   } finally {
     window.clearTimeout(timeout);
@@ -506,16 +504,6 @@ const profileDirectory = {
   }
 };
 
-function getProfileFor(name, role) {
-  return profileDirectory[name] || {
-    name,
-    role,
-    unit: role === "User" ? "Kepegawaian" : role === "Operator" ? "Tata Usaha" : role === "Administrator" ? "Sistem Informasi" : role || "-",
-    email: `${String(name || "user").toLowerCase().replaceAll(" ", ".")}@stt-pu.ac.id`,
-    phone: "0812-3456-7890",
-    address: "Jl. D.I. Panjaitan Kav. 24, Jakarta Timur"
-  };
-}
 
 const rows = {
   "Ajuan Surat": [
@@ -769,7 +757,13 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
   }, []);
 
   const config = { ...roleConfig[role], name: sessionUser?.full_name || roleConfig[role].name };
-  const currentProfile = getProfileFor(config.name, role);
+  const currentProfile = userProfile(sessionUser);
+  const updateSessionProfile = useCallback((user) => {
+    setSessionUser(user);
+    setUsername(user.username);
+    saveSession(getStoredToken(), user);
+  }, []);
+  const userRequests = ownedRequests(ajuanRequests, sessionUser?.id);
   const utilityViews = ["Pengaturan Profil"];
   const currentView = config.nav.includes(view) || utilityViews.includes(view) ? view : "Dashboard";
   const sidebarNavItems = config.nav;
@@ -874,8 +868,11 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
       }
 
       if (token.startsWith("dummy:")) {
-        const dummyUser = getStoredSessionUser();
-        if (dummyUser && !ignore) applyAuthenticatedUser(dummyUser);
+        clearSession();
+        if (!ignore) {
+          setLoggedIn(false);
+          setErrors({ form: "Silakan login kembali agar data pengguna dapat disimpan ke database." });
+        }
         setAuthLoading(false);
         return;
       }
@@ -910,11 +907,6 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     setLoggedIn(true);
   }
 
-  function applyDummyLogin(account) {
-    saveSession(`dummy:${account.user.id}`, account.user);
-    applyAuthenticatedUser(account.user);
-  }
-
   async function login(event) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -932,19 +924,12 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     setLoginLoading(true);
     setErrors({});
 
-    const dummyAccount = findDummyLogin(loginUsername, loginPassword);
-
     try {
       const user = await loginBackendSession(loginUsername, loginPassword);
       applyAuthenticatedUser(user);
       setPassword("");
     } catch (error) {
-      if (dummyAccount && !error.message.includes("Username atau password salah")) {
-        applyDummyLogin(dummyAccount);
-        setPassword("");
-        return;
-      }
-      setErrors({ form: error.message || "Backend belum bisa dihubungi. Untuk mode dummy gunakan admin/admin123, operator/operator123, pimpinan/pimpinan123, atau user/user123." });
+      setErrors({ form: error.message || "Server belum bisa dihubungi. Silakan coba lagi." });
     } finally {
       setLoginLoading(false);
     }
@@ -1020,6 +1005,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
 
   function createAjuanRequest(request) {
     if (isRemovedAjuanRequest(request)) return;
+    request = { ...request, ownerId: sessionUser?.id };
     const requestKey = getAjuanIdentityKey(request);
     setAjuanRequests((current) => [
       request,
@@ -1384,11 +1370,11 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
           </div>
         </header>
         <section className="content">
-          {currentView === "Dashboard" && (role === "Operator" ? <OperatorDashboard setView={setView} ajuanRequests={ajuanRequests} outgoingLetters={outgoingLetters} /> : role === "Pimpinan" ? <PimpinanDashboard setView={setView} ajuanRequests={ajuanRequests} /> : role === "Administrator" ? <AdminDashboard setView={setView} userRows={userRows} auditRows={auditRows} apiNotice={apiNotice} /> : <Dashboard config={config} role={role} setView={setView} />)}
-          {currentView === "Pengaturan Profil" && <ProfileSettings config={config} profile={currentProfile} role={role} setConfirm={setConfirm} />}
+          {currentView === "Dashboard" && (role === "Operator" ? <OperatorDashboard setView={setView} ajuanRequests={ajuanRequests} outgoingLetters={outgoingLetters} /> : role === "Pimpinan" ? <PimpinanDashboard setView={setView} ajuanRequests={ajuanRequests} /> : role === "Administrator" ? <AdminDashboard setView={setView} userRows={userRows} auditRows={auditRows} apiNotice={apiNotice} /> : <Dashboard key={sessionUser?.id} role={role} setView={setView} requests={userRequests} />)}
+          {currentView === "Pengaturan Profil" && <ProfileSettings key={sessionUser?.id} onProfileUpdated={updateSessionProfile} />}
           {currentView === "Laporan" && <Reports setConfirm={setConfirm} />}
           {currentView === "Approval" && <Approval setConfirm={setConfirm} ajuanRequests={ajuanRequests} outgoingLetters={outgoingLetters} onUpdateAjuan={updateAjuanRequest} onUpdateOutgoing={updateOutgoingLetter} />}
-          {currentView === "Ajuan Surat" && <AjuanSuratHome setConfirm={setConfirm} onCreateAjuan={createAjuanRequest} currentUserName={config.name} currentUserProfile={currentProfile} ajuanRequests={ajuanRequests} />}
+          {currentView === "Ajuan Surat" && <AjuanSuratHome key={sessionUser?.id} setConfirm={setConfirm} onCreateAjuan={createAjuanRequest} currentUserName={config.name} currentUserProfile={currentProfile} ajuanRequests={userRequests} />}
           {currentView === "Ajuan Masuk" && <OperatorAjuanMasuk setConfirm={setConfirm} ajuanRequests={ajuanRequests} onUpdateAjuan={updateAjuanRequest} />}
           {currentView === "Surat Masuk" && <IncomingLetterForm role={role} setConfirm={setConfirm} onLocalDispositionCreated={(disposition) => {
             publishLocalNotification(["User"], {
@@ -1399,8 +1385,8 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
               source_id: disposition.id || disposition.disposition_number
             });
           }} />}
-          {currentView === "Disposisi Masuk" && <DisposisiMasukHome setConfirm={setConfirm} />}
-          {currentView === "Tembusan Surat" && <DisposisiMasukHome setConfirm={setConfirm} viewMode="copy" />}
+          {currentView === "Disposisi Masuk" && <DisposisiMasukHome key={`${sessionUser?.id}:${currentView}`} setConfirm={setConfirm} />}
+          {currentView === "Tembusan Surat" && <DisposisiMasukHome key={`${sessionUser?.id}:${currentView}`} setConfirm={setConfirm} viewMode="copy" />}
           {currentView === "Arsip" && <ArchiveHome ajuanRequests={ajuanRequests} outgoingLetters={outgoingLetters} />}
           {currentView === "Backup" && <AdminBackup setConfirm={setConfirm} />}
           {["Konsep Surat", "Status Ajuan", "Surat Keluar", "Disposisi", "Arsip Digital", "Pengguna", "Audit Trail"].includes(currentView) && (
@@ -1445,28 +1431,50 @@ function resolveDemoRole(username) {
   return null;
 }
 
-function Dashboard({ config, role, setView }) {
+async function loadUserDispositions() {
+  const items = [];
+  for (let page = 1; ; page += 1) {
+    const payload = await apiFetch(`/dispositions?perPage=100&page=${page}`);
+    const batch = payload.data || [];
+    items.push(...batch);
+    if (batch.length < 100) return items;
+  }
+}
+
+function Dashboard({ role, setView, requests }) {
+  const [dispositions, setDispositions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    loadUserDispositions().then((items) => {
+      if (active) setDispositions(items);
+    }).catch((failure) => {
+      if (active) setError(failure.message);
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, []);
+  const visibleRequests = getLatestAjuanRequests(requests);
+  const summary = activitySummary(visibleRequests.map((item) => ({ ...item, status: getAjuanWorkflowStatus(item) })), dispositions);
   return (
     <section className="dashboardPage">
       <div className="dashboardTitle">
         <h1>Dashboard {role}</h1>
-        <p>Ringkasan aktivitas surat dan disposisi.</p>
+        <p>Ringkasan aktivitas surat dan disposisi Anda.</p>
       </div>
+      {error && <p className="fieldError" role="alert">Disposisi belum dapat dimuat: {error}</p>}
       <section className="dashboardStats">
         {[
-          ["Total Ajuan", "128", "Semua waktu", "doc", "blue"],
-          ["Diproses", "34", "Sedang berjalan", "clock", "purple"],
-          ["Disetujui", "86", "Semua waktu", "check", "green"],
-          ["Disposisi Baru", "7", "Perlu ditindaklanjuti", "mail", "orange"]
+          ["Total Ajuan", summary.total, "Semua waktu", "doc", "blue"],
+          ["Diproses", summary.processing, "Sedang berjalan", "clock", "purple"],
+          ["Disetujui", summary.approved, "Semua waktu", "check", "green"],
+          ["Disposisi Baru", loading ? "..." : error ? "?" : summary.newDispositions, "Perlu ditindaklanjuti", "mail", "orange"]
         ].map(([label, value, meta, icon, tone]) => (
           <article className={`dashStat ${tone}`} key={label}>
             <span className="dashIcon">{iconSymbol(icon)}</span>
-            <div>
-              <p>{label}</p>
-              <strong>{value}</strong>
-              <small>{meta}</small>
-            </div>
-            <Sparkline tone={tone} />
+            <div><p>{label}</p><strong>{value}</strong><small>{meta}</small></div>
           </article>
         ))}
       </section>
@@ -1476,52 +1484,25 @@ function Dashboard({ config, role, setView }) {
           <table className="dashboardTable">
             <thead><tr><th>Nomor Ajuan</th><th>Jenis Surat</th><th>Tanggal</th><th>Status</th><th>Aksi</th></tr></thead>
             <tbody>
-              {[
-                ["AJ/2025/05/00128", "Surat Izin Penelitian", "16 Mei 2025", "Disetujui"],
-                ["AJ/2025/05/00127", "Surat Tugas", "15 Mei 2025", "Diproses"],
-                ["AJ/2025/05/00126", "Surat Permohonan", "15 Mei 2025", "Diproses"],
-                ["AJ/2025/05/00125", "Surat Undangan", "14 Mei 2025", "Disetujui"],
-                ["AJ/2025/05/00124", "Surat Keterangan", "14 Mei 2025", "Ditolak"]
-              ].map((row) => (
-                <tr key={row[0]}>
-                  <td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td><Status text={row[3]} /></td><td><button className="viewBtn" aria-label={`Lihat detail ${row[0]}`}><LineIcon name="eye" /></button></td>
+              {visibleRequests.slice(0, 5).map((item) => (
+                <tr key={item.nomor}>
+                  <td>{item.nomor}</td><td>{item.jenis}</td><td>{item.tanggal}</td><td><Status text={getAjuanDisplayStatus(item)} /></td>
+                  <td><button className="viewBtn" aria-label={`Lihat ajuan ${item.nomor}`} onClick={() => setView("Ajuan Surat")}><LineIcon name="eye" /></button></td>
                 </tr>
               ))}
+              {visibleRequests.length === 0 && <tr><td colSpan={5}>Belum ada ajuan surat. Ajuan yang Anda buat akan muncul di sini.</td></tr>}
             </tbody>
           </table>
         </article>
-        <article className="dashPanel trendPanel">
-          <PanelHeader title="Tren Ajuan Surat (Bulanan)" action="12 Bulan Terakhir" />
-          <div className="chartLegend"><span className="blueDot" />Jumlah Ajuan <span className="purpleDot" />Disetujui</div>
-          <div className="lineChart">
-            <svg viewBox="0 0 720 230" role="img" aria-label="Tren ajuan surat bulanan">
-              <defs>
-                <linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#2d73ff" stopOpacity="0.18" />
-                  <stop offset="100%" stopColor="#2d73ff" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              {[30, 70, 110, 150, 190].map((y) => <line x1="36" x2="700" y1={y} y2={y} key={y} />)}
-              <path className="area" d="M42 194 L94 160 L150 112 L206 108 L262 92 L318 120 L374 132 L430 120 L486 98 L542 120 L598 112 L654 46 L700 104 L700 206 L42 206 Z" />
-              <polyline className="line blue" points="42,194 94,160 150,112 206,108 262,92 318,120 374,132 430,120 486,98 542,120 598,112 654,46 700,104" />
-              <polyline className="line purple" points="42,204 94,178 150,142 206,138 262,128 318,146 374,164 430,158 486,140 542,158 598,148 654,106 700,134" />
-              {["Jun '24", "Jul '24", "Agu '24", "Sep '24", "Okt '24", "Nov '24", "Des '24", "Jan '25", "Feb '25", "Mar '25", "Apr '25", "Mei '25"].map((label, index) => <text x={42 + index * 58} y="224" key={label}>{label}</text>)}
-            </svg>
-          </div>
-        </article>
         <article className="dashPanel summaryPanel">
           <h3>Ringkasan Status Ajuan</h3>
-          <div className="summaryBody">
-            <div className="donut"><span><strong>128</strong><small>Total</small></span></div>
-            <div className="summaryRows">
-              {[
-                ["Disetujui", "86 (67,2%)", "blue"],
-                ["Diproses", "34 (26,6%)", "purple"],
-                ["Ditolak", "6 (4,7%)", "orange"],
-                ["Dibatalkan", "2 (1,5%)", "gray"]
-              ].map(([label, value, tone]) => <p key={label}><i className={tone} />{label}<strong>{value}</strong></p>)}
-              <button className="detailLink">Lihat detail →</button>
-            </div>
+          <div className="summaryRows">
+            {[
+              ["Draf", summary.draft], ["Diproses", summary.processing],
+              ["Disetujui / Selesai", summary.approved], ["Ditolak / Perlu Revisi", summary.rejected],
+              ["Dibatalkan", summary.cancelled]
+            ].map(([label, count]) => <p key={label}>{label}<strong>{count}</strong></p>)}
+            <button className="detailLink" onClick={() => setView("Ajuan Surat")}>Lihat semua ajuan ?</button>
           </div>
         </article>
       </section>
@@ -4124,29 +4105,6 @@ function writeLocalDispositions(dispositions) {
   writeLocalJson(LOCAL_DISPOSITIONS_KEY, dispositions);
 }
 
-const defaultUserDispositionRows = [
-  ["DSP/2025/05/00021", "Evaluasi dokumen permohonan data", "Dewi Pimpinan", "Tinggi", "20 Mei 2025", "Dikirim"],
-  ["DSP/2025/05/00020", "Siapkan laporan tindak lanjut rapat koordinasi", "Dewi Pimpinan", "Normal", "22 Mei 2025", "Diterima"],
-  ["DSP/2025/05/00019", "Lengkapi bahan pendukung surat tugas", "Dewi Pimpinan", "Tinggi", "18 Mei 2025", "Ditindaklanjuti"],
-  ["DSP/2025/05/00018", "Arsipkan dokumen undangan kegiatan", "Dewi Pimpinan", "Rendah", "Selesai", "Selesai"]
-];
-
-const defaultUserCopyRows = [
-  ["TMB/2026/05/00008", "Informasi Kalender Akademik Semester Genap 2026", "BAAK", "Tembusan", "12 Mei 2026", "Belum Dibaca"],
-  ["TMB/2026/05/00007", "Undangan Rapat Koordinasi Kegiatan Kampus", "Bagian Akademik", "Tembusan", "9 Mei 2026", "Dibaca"]
-].map((row) => {
-  row.detail = {
-    kind: "Tembusan",
-    nomorSurat: row[0],
-    pengirim: row[2],
-    perihal: row[1],
-    sentAt: "2026-05-12T08:00:00+07:00",
-    catatan: "Surat ini diteruskan sebagai tembusan untuk diketahui atau disimpan sebagai informasi.",
-    lampiran: [[`${row[0].replaceAll("/", "-")}.pdf`, "184 KB", "Dokumen tembusan"]]
-  };
-  return row;
-});
-
 function mapIncomingLetterToOperatorRow(item) {
   const id = item.id || item.incoming_letter_id || "";
   const agenda = item.agenda_number || item.agendaNumber || item.agenda || "-";
@@ -5153,9 +5111,7 @@ function AjuanSuratHome({ setConfirm, onCreateAjuan, currentUserName, currentUse
   const [selectedAjuan, setSelectedAjuan] = useState(null);
   const [historyPage, setHistoryPage] = useState(1);
   const [historyPageSize, setHistoryPageSize] = useState(10);
-  const currentUserRequests = ajuanRequests.filter((item) => (
-    item.pemohon === currentUserName && item.nomor !== "AJ/2025/05/00130"
-  ));
+  const currentUserRequests = ajuanRequests;
   const visibleUserRequests = getLatestAjuanRequests(currentUserRequests);
   const userRequestRows = visibleUserRequests.map((item, index) => [
     String(index + 1),
@@ -5441,7 +5397,7 @@ function historyRowToAjuan(row, currentUserName, currentUserProfile) {
     nomorSuratFinal: row[7] || "",
     jenis: row[2],
     pemohon: currentUserName,
-    unit: currentUserProfile?.unit || "Kepegawaian",
+    unit: currentUserProfile?.unit || "",
     tanggal: row[4],
     status: row[5],
     judul: row[3],
@@ -5742,7 +5698,7 @@ function AjuanSuratCreate({ onCancel, setConfirm, onCreateAjuan, currentUserName
       nomor,
       jenis,
       pemohon: currentUserName || "Budi Santoso",
-      unit: currentUserProfile?.unit || "Kepegawaian",
+      unit: currentUserProfile?.unit || "",
       tanggal: today,
       status: "Menunggu Approval",
       dikirimDariDraft: intent === "send" && draft?.status === "Draft",
@@ -5760,10 +5716,10 @@ function AjuanSuratCreate({ onCancel, setConfirm, onCreateAjuan, currentUserName
         hour: "2-digit",
         minute: "2-digit"
       }) : "",
-      nim: currentUserProfile?.nim || "202101891",
-      nik: currentUserProfile?.nik || "3309190107020006",
-      email: currentUserProfile?.email || "budi.santoso@stt-pu.ac.id",
-      phone: currentUserProfile?.phone || "0812-3456-7890",
+      nim: currentUserProfile?.nim || "",
+      nik: currentUserProfile?.nik || "",
+      email: currentUserProfile?.email || "",
+      phone: currentUserProfile?.phone || "",
       lampiran
     });
     onCancel();
@@ -5966,42 +5922,23 @@ function DisposisiMasukHome({ setConfirm, viewMode = "disposition" }) {
   const [previewDocument, setPreviewDocument] = useState(null);
   const [documentActionError, setDocumentActionError] = useState("");
   const [activeDocumentAction, setActiveDocumentAction] = useState("");
-  const [dispositionItems, setDispositionItems] = useState(defaultUserDispositionRows);
-  const [copyItems, setCopyItems] = useState(defaultUserCopyRows);
+  const [dispositionItems, setDispositionItems] = useState([]);
+  const [copyItems, setCopyItems] = useState([]);
 
+  const [loading, setLoading] = useState(!isCopyView);
+  const [loadError, setLoadError] = useState("");
   useEffect(() => {
+    if (isCopyView) return;
     let active = true;
-
-    async function loadDispositions() {
-      try {
-        const localRows = readLocalDispositions().map(mapDispositionToUserRow);
-        if (getStoredToken() && !isDummyToken()) {
-          const payload = await apiFetch("/dispositions?perPage=50");
-          if (!active) return;
-          const apiRows = (payload.data || []).map(mapDispositionToUserRow);
-          const byNumber = new Map();
-          [...apiRows, ...localRows, ...defaultUserDispositionRows].forEach((row) => {
-            if (!byNumber.has(row[0])) byNumber.set(row[0], row);
-          });
-          setDispositionItems([...byNumber.values()]);
-          return;
-        }
-
-        const byNumber = new Map();
-        [...localRows, ...defaultUserDispositionRows].forEach((row) => {
-          if (!byNumber.has(row[0])) byNumber.set(row[0], row);
-        });
-        if (active) setDispositionItems([...byNumber.values()]);
-      } catch (error) {
-        if (active) setConfirm({ title: "Gagal memuat disposisi", body: error.message || "Daftar disposisi belum dapat dimuat." });
-      }
-    }
-
-    loadDispositions();
-    return () => {
-      active = false;
-    };
-  }, [setConfirm]);
+    loadUserDispositions().then((items) => {
+      if (active) setDispositionItems(items.map(mapDispositionToUserRow));
+    }).catch((error) => {
+      if (active) setLoadError(error.message || "Daftar disposisi belum dapat dimuat.");
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [isCopyView]);
   const pageSize = 3;
   const inboxItems = isCopyView ? copyItems : dispositionItems;
   const dispositionStats = [
@@ -6377,6 +6314,8 @@ function DisposisiMasukHome({ setConfirm, viewMode = "disposition" }) {
         </div>
       </header>
 
+      {loading && <p role="status">Memuat disposisi...</p>}
+      {loadError && <p className="fieldError" role="alert">{loadError}</p>}
       <section className="userDispositionStats" aria-label="Ringkasan disposisi masuk">
         {summaryStats.map(([label, value, meta, icon, tone, targetStatus]) => (
           <button type="button" className={`userDispositionStat ${tone}`} key={label} onClick={() => {
@@ -6439,7 +6378,7 @@ function DisposisiMasukHome({ setConfirm, viewMode = "disposition" }) {
                 </article>
               );
             })}
-            {filteredDispositions.length === 0 && (
+            {!loading && !loadError && filteredDispositions.length === 0 && (
               <div className="disposisiEmptyCard">
                 <strong>Tidak ada surat</strong>
                 <span>{isCopyView ? "Belum ada tembusan yang sesuai dengan pencarian." : "Belum ada disposisi yang sesuai dengan pencarian."}</span>
@@ -7724,9 +7663,11 @@ function OperatorOutgoingList({ query, setQuery, outgoingLetters, onCreate, onDe
 
 function AdminUserCreate({ onCancel, onCreateUser, initialData }) {
   const isEdit = !!initialData;
+  const [saving, setSaving] = useState(false);
 
-  function saveUser(event) {
+  async function saveUser(event) {
     event.preventDefault();
+    if (saving) return;
     const form = new FormData(event.currentTarget);
     const name = String(form.get("name") || "").trim();
     const username = isEdit ? initialData.username : String(form.get("username") || "").trim();
@@ -7736,8 +7677,13 @@ function AdminUserCreate({ onCancel, onCreateUser, initialData }) {
     const status = String(form.get("status") || "Aktif").trim();
     const unit = String(form.get("unit") || "").trim();
     const jabatan = String(form.get("jabatan") || "").trim();
-    if (!name || (!isEdit && !password) || !role || !unit) return;
-    onCreateUser({ name, username, email, password, role, status, unit, jabatan });
+    if (!name || (!isEdit && (!username || !password)) || !role || !unit) return;
+    setSaving(true);
+    try {
+      await onCreateUser({ name, username, email, password, role, status, unit, jabatan });
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -7799,7 +7745,7 @@ function AdminUserCreate({ onCancel, onCreateUser, initialData }) {
 
           <div className="dispositionSubmitBar">
             <button type="button" className="ghostBtn" onClick={onCancel}>Batal</button>
-            <button type="submit" className="primaryBtn saveUserBtn"><LineIcon name="check" /> {isEdit ? "Simpan Perubahan" : "Simpan User"}</button>
+            <button type="submit" className="primaryBtn saveUserBtn" disabled={saving}><LineIcon name="check" /> {saving ? "Menyimpan..." : isEdit ? "Simpan Perubahan" : "Simpan User"}</button>
           </div>
         </form>
 
@@ -10067,46 +10013,89 @@ function Notifications({ notifications = [], meta = {}, loading, onOpen }) {
   );
 }
 
-function ProfileSettings({ config, profile, role, setConfirm }) {
+function ProfileSettings({ onProfileUpdated }) {
+  const [profile, setProfile] = useState(null);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    let active = true;
+    apiFetch("/auth/me").then(({ user }) => {
+      if (!active) return;
+      const next = userProfile(user);
+      setProfile(next);
+      setName(next.name);
+      setEmail(next.email);
+      onProfileUpdated(user);
+    }).catch((failure) => {
+      if (active) setError(failure.message);
+    });
+    return () => { active = false; };
+  }, [onProfileUpdated]);
+
+  async function saveProfile(event) {
+    event.preventDefault();
+    if (saving) return;
+    setError("");
+    setNotice("");
+    if (!name.trim()) {
+      setError("Nama lengkap wajib diisi.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const { user } = await apiFetch("/auth/me", {
+        method: "PUT", body: JSON.stringify({ fullName: name.trim(), email: email.trim() })
+      });
+      const next = userProfile(user);
+      setProfile(next);
+      setName(next.name);
+      setEmail(next.email);
+      onProfileUpdated(user);
+      setNotice("Perubahan profil berhasil disimpan.");
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <section className="profileSettingsPage">
-      <header className="dashboardTitle">
-        <h1>Pengaturan Profil</h1>
-        <p>Kelola informasi akun Anda.</p>
-      </header>
-
-      <section className="profileSettingsGrid">
+      <header className="dashboardTitle"><h1>Pengaturan Profil</h1><p>Kelola informasi akun Anda.</p></header>
+      {error && <p className="fieldError" role="alert">{error}</p>}
+      {notice && <p role="status">{notice}</p>}
+      {!profile && !error && <p role="status">Memuat profil...</p>}
+      {profile && <section className="profileSettingsGrid">
         <article className="dashPanel profileSummaryCard">
           <span className="avatarFace large" />
-          <strong>{config.name}</strong>
-          <small>{role}</small>
+          <strong>{profile.name}</strong><small>{profile.role}</small>
           <div className="profileMetaRows">
-            <span>Unit Kerja <b>{profile.unit}</b></span>
-            <span>Status Akun <b>Aktif</b></span>
+            <span>Unit Kerja <b>{profile.unit || "?"}</b></span>
+            <span>Jabatan <b>{profile.position || "?"}</b></span>
+            <span>Status Akun <b>{profile.status}</b></span>
             <span>Zona Waktu <b>Asia/Jakarta</b></span>
           </div>
         </article>
-
         <article className="dashPanel profileFormCard">
           <h3>Informasi Profil</h3>
-          <form className="profileForm" onSubmit={(event) => {
-            event.preventDefault();
-            setConfirm({ title: "Simpan perubahan profil?", body: "Perubahan profil akan disimpan dan dicatat pada audit trail." });
-          }}>
+          <form className="profileForm" onSubmit={saveProfile}>
             <div className="formGrid">
-              <label>Nama Lengkap<input name="name" defaultValue={config.name} /></label>
-              <label>Role<input name="role" defaultValue={role} readOnly /></label>
-              <label>Email<input name="email" type="email" defaultValue={profile.email} /></label>
-              <label>Nomor HP<input name="phone" defaultValue={profile.phone} /></label>
-              <label>Unit Kerja<input name="unit" defaultValue={profile.unit} /></label>
+              <label>Nama Lengkap<input name="name" value={name} onChange={(event) => setName(event.target.value)} required maxLength={150} disabled={saving} /></label>
+              <label>Username<input value={profile.username} readOnly /></label>
+              <label>Email<input name="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={150} disabled={saving} /></label>
+              <label>Role<input value={profile.role} readOnly /></label>
+              <label>Unit Kerja<input value={profile.unit} readOnly /></label>
+              <label>Jabatan<input value={profile.position} readOnly /></label>
+              <label>Status Akun<input value={profile.status} readOnly /></label>
             </div>
-            <label className="profileFullField">Alamat<textarea name="address" defaultValue={profile.address} /></label>
-            <div className="actions">
-              <button type="submit" className="primaryBtn">Simpan Perubahan</button>
-            </div>
+            <p>Username, role, unit kerja, jabatan, dan status akun dikelola Administrator.</p>
+            <div className="actions"><button type="submit" className="primaryBtn" disabled={saving}>{saving ? "Menyimpan..." : "Simpan Perubahan"}</button></div>
           </form>
         </article>
-      </section>
+      </section>}
     </section>
   );
 }

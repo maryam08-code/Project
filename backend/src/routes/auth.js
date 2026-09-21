@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { createToken } from "../auth/token.js";
 import { requireAuth } from "../middleware/auth.js";
-import { query } from "../db.js";
+import { query, withTransaction } from "../db.js";
 import { writeAuditLog } from "../utils/audit.js";
 
 export const authRouter = Router();
@@ -55,4 +55,37 @@ authRouter.post("/logout", requireAuth, async (request, response, next) => {
 
 authRouter.get("/me", requireAuth, (request, response) => {
   response.json({ user: request.user });
+});
+
+authRouter.put("/me", requireAuth, async (request, response, next) => {
+  try {
+    const fullName = typeof request.body?.fullName === "string" ? request.body.fullName.trim() : "";
+    const email = typeof request.body?.email === "string" ? request.body.email.trim() : "";
+    if (!fullName || fullName.length > 150) {
+      return response.status(422).json({ message: "Nama lengkap wajib diisi, maksimal 150 karakter." });
+    }
+    if (email && (email.length > 150 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+      return response.status(422).json({ message: "Format email tidak valid, maksimal 150 karakter." });
+    }
+    const updated = await withTransaction(async (client) => {
+      const result = await client.query(
+        `UPDATE users SET full_name = $1, email = NULLIF($2, ''), updated_at = now()
+         WHERE id = $3 AND deleted_at IS NULL
+         RETURNING full_name, email`,
+        [fullName, email, request.user.id]
+      );
+      await client.query(
+        `INSERT INTO audit_logs (user_id, activity, module, data_id, data_label, ip_address, user_agent)
+         VALUES ($1, 'update_profile', 'users', $1, $2, $3, $4)`,
+        [request.user.id, fullName, request.ip, request.get("user-agent") || null]
+      );
+      return result.rows[0];
+    });
+    response.json({ user: { ...request.user, ...updated } });
+  } catch (error) {
+    if (error.code === "23505") {
+      return response.status(409).json({ message: "Email sudah digunakan oleh akun lain." });
+    }
+    next(error);
+  }
 });
