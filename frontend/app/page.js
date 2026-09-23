@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ownedRequests, activitySummary } from "./utils/user-activity.mjs";
 import { userProfile } from "./utils/user-profile.mjs";
+import { requestLogin } from "./utils/login-request.mjs";
+import { NotificationProvider, NotificationBell, NotificationPage } from "./components/notification-center";
 
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api").replace(/\/$/, "");
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "/api").replace(/\/$/, "");
 const AUTH_TOKEN_KEY = "eoffice_auth_token";
 const DUMMY_USER_KEY = "eoffice_dummy_user";
 const LOCAL_AJUAN_KEY = "eoffice_local_ajuan_requests";
@@ -22,7 +24,8 @@ const backendRoleToUiRole = {
   administrator: "Administrator",
   operator: "Operator",
   pimpinan: "Pimpinan",
-  user: "User"
+  user: "User",
+  pegawai: "Pegawai"
 };
 
 const dummyLoginUsers = [
@@ -345,15 +348,7 @@ async function apiFetch(path, options = {}) {
 }
 
 async function loginBackendSession(username, password) {
-  const response = await fetchWithTimeout(`${API_BASE_URL}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password })
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.message || "Login backend gagal.");
-  }
+  const payload = await requestLogin(API_BASE_URL, username, password);
   saveSession(payload.token, payload.user);
   return payload.user;
 }
@@ -768,7 +763,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     saveSession(getStoredToken(), user);
   }, []);
   const userRequests = ownedRequests(ajuanRequests, sessionUser?.id);
-  const utilityViews = ["Pengaturan Profil"];
+  const utilityViews = ["Pengaturan Profil", "Notifikasi"];
   const currentView = config.nav.includes(view) || utilityViews.includes(view) ? view : "Dashboard";
   const sidebarNavItems = config.nav;
   const activeNavIndex = Math.max(sidebarNavItems.indexOf(currentView), 0);
@@ -914,6 +909,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
 
   async function login(event) {
     event.preventDefault();
+    if (loginLoading) return;
     const form = new FormData(event.currentTarget);
     const loginUsername = String(form.get("username") || "").trim();
     const loginPassword = String(form.get("password") || "");
@@ -1325,6 +1321,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
   }
 
   return (
+    <NotificationProvider key={sessionUser?.id} request={apiFetch} role={role} allowedViews={config.nav} onNavigate={setView}>
     <main className="appShell">
       <aside className={menuOpen ? "sidebar open" : "sidebar"}>
         <div className="sidebarBrand">
@@ -1351,6 +1348,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
             </label>
           )}
           <div className="topbarActions">
+            <NotificationBell />
             <button className={profileOpen ? "profilePill open" : "profilePill"} onClick={() => setProfileOpen((current) => !current)} aria-expanded={profileOpen} aria-haspopup="menu">
               <span className="avatarFace" />
               <span><strong>{config.name}</strong><small>{role}</small></span>
@@ -1375,6 +1373,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
           </div>
         </header>
         <section className="content">
+          {currentView === "Notifikasi" && <NotificationPage />}
           {currentView === "Dashboard" && (role === "Operator" ? <OperatorDashboard setView={setView} ajuanRequests={ajuanRequests} outgoingLetters={outgoingLetters} /> : role === "Pimpinan" ? <PimpinanDashboard setView={setView} ajuanRequests={ajuanRequests} /> : role === "Administrator" ? <AdminDashboard setView={setView} userRows={userRows} auditRows={auditRows} apiNotice={apiNotice} /> : <Dashboard key={sessionUser?.id} role={role} setView={setView} requests={userRequests} />)}
           {currentView === "Pengaturan Profil" && <ProfileSettings key={sessionUser?.id} onProfileUpdated={updateSessionProfile} />}
           {currentView === "Laporan" && <Reports setConfirm={setConfirm} />}
@@ -1423,6 +1422,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
       </section>
       {confirm && <ConfirmModal confirm={confirm} setConfirm={setConfirm} />}
     </main>
+    </NotificationProvider>
   );
 }
 
@@ -1757,25 +1757,23 @@ function PimpinanDashboard({ setView, ajuanRequests = [] }) {
   );
 }
 
-function AdminDashboard({ setView, userRows, auditRows, apiNotice }) {
+function AdminDashboard({ setView, userRows, apiNotice }) {
   const cards = [
     ["Total Pengguna", String(userRows.length), `${userRows.filter((row) => String(row[4]).toLowerCase() === "aktif").length} akun aktif`, "user", "blue", "Pengguna"],
     ["Role Sistem", "5", "RBAC dasar aktif", "shield", "purple", "Pengguna"],
-    ["Audit Terbaru", String(auditRows.length), "Aktivitas tercatat", "clock", "orange", "Audit Trail"],
     ["Backup", "03:00", "Terakhir berhasil", "upload", "green", "Backup"]
   ];
   const recentUsers = userRows.slice(0, 5);
-  const recentAudits = auditRows.slice(0, 5);
 
   return (
     <section className="dashboardPage">
       <div className="dashboardTitle">
         <h1>Dashboard Administrator</h1>
-        <p>Ringkasan pengguna, role, audit trail, backup, dan kesehatan sistem.</p>
+        <p>Ringkasan pengguna, role, backup, dan kesehatan sistem.</p>
         {apiNotice && <small className="fieldError">{apiNotice}</small>}
       </div>
 
-      <section className="dashboardStats">
+      <section className="dashboardStats adminDashboardStats">
         {cards.map(([label, value, meta, icon, tone, target]) => (
           <button type="button" className={`dashStat clickable ${tone}`} key={label} onClick={() => setView(target)} aria-label={`Buka ${target}`}>
             <span className="dashIcon">{iconSymbol(icon)}</span>
@@ -1807,18 +1805,6 @@ function AdminDashboard({ setView, userRows, auditRows, apiNotice }) {
               ))}
             </tbody>
           </table>
-        </article>
-
-        <article className="dashPanel auditPanel">
-          <PanelHeader title="Audit Terbaru" action="Lihat semua" onClick={() => setView("Audit Trail")} />
-          <div className="adminAuditList">
-            {recentAudits.map(([time, actor, module, action, log], index) => (
-              <div className="adminAuditItem" key={log?.id || `${time}-${action}-${index}`}>
-                <span><LineIcon name="clock" /></span>
-                <div><strong>{action}</strong><small>{time} - {actor} - {module}</small></div>
-              </div>
-            ))}
-          </div>
         </article>
 
         <article className="dashPanel trendPanel">

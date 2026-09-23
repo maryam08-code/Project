@@ -161,6 +161,12 @@ backupsRouter.post("/", requireAuth, requireRole("administrator"), async (reques
       // 3. Update document owner_id to link back to the backup record
       await client.query("UPDATE documents SET owner_id = $1 WHERE id = $2", [backupResult.rows[0].id, documentId]);
 
+      await client.query(
+        `INSERT INTO notifications (recipient_id, type, title, message, source_type, source_id)
+         VALUES ($1, 'generic', 'Backup berhasil', $2, 'backups', $3)`,
+        [request.user.id, `Backup ${backupCode} berhasil dibuat dan dapat diunduh.`, backupResult.rows[0].id]
+      );
+
       return backupResult.rows[0];
     });
 
