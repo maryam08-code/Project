@@ -40,6 +40,7 @@ Create the `eoffice_db` database first, then run `npm run migrate`. The migratio
 ## Initial Endpoints
 
 - `GET /api/health`
+- `GET /api/public/verify/:letterNumber` for public lookup of incoming and outgoing letter numbers
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`

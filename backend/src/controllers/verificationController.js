@@ -1,92 +1,22 @@
-import { pool } from '../db.js';
-
-export const verifyLetter = async (req, res) => {
-  try {
-    const { letterNumber } = req.params;
-    // Hapus spasi dan ubah ke huruf kecil untuk pencarian fleksibel
-    const rawInput = decodeURIComponent(letterNumber).trim();
-    const searchPattern = `%${rawInput}%`;
-
-    // Query pencarian pencocokan pola (LIKE) di semua skema tabel surat
-    const query = `
-      SELECT 
-        letter_number AS "nomorSurat",
-        subject AS "perihal",
-        origin AS "instansiPenerbit",
-        destination AS "unitBagian",
-        letter_date AS "tanggalSurat",
-        status AS "statusVerifikasi",
-        'Surat Masuk' AS "jenisSurat",
-        file_path AS "filePath"
-      FROM documents
-      WHERE letter_number ILIKE $1 OR agenda_number ILIKE $1
-
-      UNION ALL
-
-      SELECT 
-        letter_number AS "nomorSurat",
-        subject AS "perihal",
-        COALESCE(sender, 'STT Pekerjaan Umum Jakarta') AS "instansiPenerbit",
-        COALESCE(recipient, 'Eksternal') AS "unitBagian",
-        letter_date AS "tanggalSurat",
-        status AS "statusVerifikasi",
-        'Surat Keluar' AS "jenisSurat",
-        file_path AS "filePath"
-      FROM outgoing_letters
-      WHERE letter_number ILIKE $1 OR agenda_number ILIKE $1
-
-      LIMIT 1;
-    `;
-
-    let result = await db.query(query, [searchPattern]);
-
-    // Jika tabel outgoing_letters belum ada, cari ke tabel documents saja
-    if (result.rows.length === 0) {
-      const fallbackQuery = `
-        SELECT 
-          letter_number AS "nomorSurat",
-          subject AS "perihal",
-          origin AS "instansiPenerbit",
-          destination AS "unitBagian",
-          letter_date AS "tanggalSurat",
-          status AS "statusVerifikasi",
-          'Surat Resmi' AS "jenisSurat",
-          file_path AS "filePath"
-        FROM documents
-        WHERE letter_number ILIKE $1 OR agenda_number ILIKE $1 OR subject ILIKE $1
-        LIMIT 1;
-      `;
-      result = await db.query(fallbackQuery, [searchPattern]);
-    }
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        valid: false,
-        message: 'Surat dengan nomor/kode tersebut tidak ditemukan atau belum terdaftar.'
-      });
-    }
-
-    const letter = result.rows[0];
-
-    return res.status(200).json({
-      valid: true,
-      data: {
-        nomorSurat: letter.nomorSurat || rawInput,
-        tanggalSurat: letter.tanggalSurat ? new Date(letter.tanggalSurat).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }) : '-',
-        jenisSurat: letter.jenisSurat || 'Surat Keluar / Resmi',
-        perihal: letter.perihal || '-',
-        instansiPenerbit: letter.instansiPenerbit || 'STT Pekerjaan Umum Jakarta',
-        unitBagian: letter.unitBagian || 'Bagian Akademik',
-        penandatangan: 'Kepala Bagian / Pimpinan',
-        statusVerifikasi: 'Valid / Resmi Diterbitkan',
-        pdfUrl: letter.filePath ? `http://localhost:8000/storage/${letter.filePath}` : null
-      }
-    });
-  } catch (error) {
-    console.error('Error verification:', error);
-    return res.status(500).json({
-      valid: false,
-      message: 'Terjadi kesalahan sistem saat memeriksa data surat.'
-    });
-  }
-};
+﻿import { query } from "../db.js";
+const letterStatus={draft:"Draf",diperiksa:"Sedang diperiksa",menunggu_approval:"Menunggu persetujuan",disetujui:"Disetujui, belum dikirim",ditolak:"Ditolak",dikirim:"Sah - sudah dikirim",diregistrasi:"Terdaftar",diteruskan:"Diteruskan",didisposisikan:"Didisposisikan",ditindaklanjuti:"Ditindaklanjuti",selesai:"Selesai"};
+export async function verifyLetter(request,response,next){
+ const rawInput=request.params.letterNumber.trim();
+ if(!rawInput)return response.status(400).json({valid:false,message:"Nomor surat wajib diisi."});
+ try{
+  const result=await query(`SELECT letter_number AS "nomorSurat", subject AS "perihal", sender AS "instansiPenerbit",
+   'STT Pekerjaan Umum' AS "unitBagian",letter_date AS "tanggalSurat",status::text AS "statusSurat",'Surat Masuk' AS "jenisSurat",
+   NULL::text AS "penandatanganNama",NULL::text AS "penandatanganJabatan"
+   FROM incoming_letters WHERE deleted_at IS NULL AND (letter_number ILIKE $1 OR agenda_number ILIKE $1)
+   UNION ALL
+   SELECT o.letter_number,o.subject,'STT Pekerjaan Umum',o.destination,o.letter_date,o.status::text,'Surat Keluar',u.full_name,u.position
+   FROM outgoing_letters o LEFT JOIN users u ON u.id=o.approver_id
+   WHERE o.deleted_at IS NULL AND o.letter_number ILIKE $1 LIMIT 1`,[`%${rawInput}%`]);
+  if(!result.rows.length)return response.status(404).json({valid:false,message:"Surat dengan nomor tersebut tidak ditemukan di E-Office."});
+  const letter=result.rows[0];const issued=letter.jenisSurat==="Surat Keluar"&&letter.statusSurat==="dikirim";
+  const status=letterStatus[letter.statusSurat]||letter.statusSurat;
+  const verificationStatus=letter.jenisSurat==="Surat Masuk"?`Tercatat sebagai surat masuk - ${status}`:status;
+  const message=letter.jenisSurat==="Surat Masuk"?"Surat masuk tercatat di E-Office. Pencatatan ini bukan verifikasi tanda tangan penerbit.":issued?"Nomor surat terdaftar dan berstatus telah dikirim di E-Office.":`Nomor surat terdaftar di E-Office, tetapi statusnya: ${status}.`;
+  response.json({valid:issued,message,data:{nomorSurat:letter.nomorSurat,perihal:letter.perihal,instansi:letter.instansiPenerbit,penerima:letter.unitBagian,penandatangan:{nama:letter.penandatanganNama||"",jabatan:letter.penandatanganJabatan||""},tanggalSurat:letter.tanggalSurat,jenisSurat:letter.jenisSurat,status:verificationStatus,statusVerifikasi:verificationStatus}});
+ }catch(error){next(error);}
+}

@@ -339,7 +339,7 @@ async function apiFetch(path, options = {}) {
       Authorization: `Bearer ${token}`,
       ...(options.headers || {})
     }
-  });
+  }, options.timeoutMs || API_TIMEOUT_MS);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(payload.message || "Request backend gagal.");
@@ -351,6 +351,25 @@ async function loginBackendSession(username, password) {
   const payload = await requestLogin(API_BASE_URL, username, password);
   saveSession(payload.token, payload.user);
   return payload.user;
+}
+
+async function publishFinalLetter(detail, sourceType) {
+  const attachment = await hydrateAttachmentPayload(detail.suratFinalOperator || detail.lampiranFinal?.[0]);
+  if (!attachment?.[3]) throw new Error('Dokumen final tidak tersedia. Unggah kembali dokumen final agar surat dapat diverifikasi.');
+  return apiFetch('/final-letters', {
+    method: 'POST',
+    timeoutMs: 20000,
+    body: JSON.stringify({
+      sourceType, sourceReference: detail.nomor,
+      nomorSurat: detail.nomorFinal || detail.nomorSuratFinal,
+      kodeUnik: detail.kodeUnik, status: detail.status,
+      perihal: detail.perihal || detail.judul || detail.jenis,
+      penerima: detail.tujuan, jenisSurat: detail.jenis,
+      tanggalSurat: detail.tanggal,
+      penandatanganNama: detail.diputuskanOleh,
+      document: { name: attachment[0], type: attachment[4], dataUrl: attachment[3] }
+    })
+  });
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = API_TIMEOUT_MS) {
@@ -720,6 +739,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
   const [userRows, setUserRows] = useState([]);
   const [auditRows, setAuditRows] = useState(rows["Audit Trail"]);
   const [apiNotice, setApiNotice] = useState("");
+  const [finalSyncError, setFinalSyncError] = useState('');
   const [localDataReady, setLocalDataReady] = useState(false);
   const [userParams, setUserParams] = useState({ page: 1, search: "", role: "", status: "" });
   const [userMeta, setUserMeta] = useState({ totalPages: 1, totalCount: 0 });
@@ -824,6 +844,27 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     if (!localDataReady) return;
     writeLocalJson(LOCAL_OUTGOING_KEY, stripOutgoingAttachmentPayloads(normalizeOutgoingWorkflowStatus(outgoingLetters)));
   }, [outgoingLetters, localDataReady]);
+
+  useEffect(() => {
+    if (!localDataReady || authLoading || !loggedIn || role !== 'Operator' || isDummyToken()) return;
+    let cancelled = false;
+    async function syncFinalLetters() {
+      setFinalSyncError('');
+      const candidates = [
+        ...ajuanRequests.filter(item => item.status === 'Selesai').map(item => [item, 'ajuan']),
+        ...outgoingLetters.filter(item => ['Dikirim', 'Selesai'].includes(item.status)).map(item => [item, 'outgoing'])
+      ].filter(([item]) => item.kodeUnik && (item.nomorFinal || item.nomorSuratFinal) && (item.suratFinalOperator || item.lampiranFinal?.length));
+      for (const [item, sourceType] of candidates) {
+        if (cancelled) return;
+        try { await publishFinalLetter(item, sourceType); }
+        catch (error) {
+          if (!cancelled) setFinalSyncError(`Surat ${item.nomorFinal || item.nomorSuratFinal} belum tersinkron untuk verifikasi: ${error.message}`);
+        }
+      }
+    }
+    syncFinalLetters();
+    return () => { cancelled = true; };
+  }, [localDataReady, authLoading, loggedIn, role, ajuanRequests, outgoingLetters]);
 
   useEffect(() => {
     if (!localDataReady || (!isDummyToken() && getStoredToken())) return;
@@ -1373,6 +1414,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
           </div>
         </header>
         <section className="content">
+          {role === 'Operator' && finalSyncError && <p className="fieldError" role="alert">{finalSyncError}</p>}
           {currentView === "Notifikasi" && <NotificationPage />}
           {currentView === "Dashboard" && (role === "Operator" ? <OperatorDashboard setView={setView} ajuanRequests={ajuanRequests} outgoingLetters={outgoingLetters} /> : role === "Pimpinan" ? <PimpinanDashboard setView={setView} ajuanRequests={ajuanRequests} /> : role === "Administrator" ? <AdminDashboard setView={setView} userRows={userRows} auditRows={auditRows} apiNotice={apiNotice} /> : <Dashboard key={sessionUser?.id} role={role} setView={setView} requests={userRequests} />)}
           {currentView === "Pengaturan Profil" && <ProfileSettings key={sessionUser?.id} onProfileUpdated={updateSessionProfile} />}
@@ -2149,6 +2191,7 @@ function AjuanMasukDetail({ ajuan, detail, onBack, setConfirm, onUpdateAjuan }) 
 
 function OperatorFinalNumberPanel({ nomor, detail, setConfirm, onSubmitFinal, onSent }) {
   const [nomorSurat, setNomorSurat] = useState(detail.nomorSuratFinal || "");
+  const [kodeUnik, setKodeUnik] = useState(detail.kodeUnik || "");
   const [errors, setErrors] = useState({});
 
   async function submitFinalNumbering(event) {
@@ -2156,8 +2199,10 @@ function OperatorFinalNumberPanel({ nomor, detail, setConfirm, onSubmitFinal, on
     const form = new FormData(event.currentTarget);
     const finalFile = form.get("finalDocument");
     const trimmedNumber = nomorSurat.trim();
+    const trimmedCode = kodeUnik.trim();
     const nextErrors = {};
     if (!trimmedNumber) nextErrors.nomorSurat = "Nomor surat wajib diisi untuk keabsahan surat.";
+    if (!trimmedCode) nextErrors.kodeUnik = "Kode unik wajib diisi.";
     const fileError = finalFile?.name ? validateUploadFile(finalFile) : "Upload dokumen final wajib diisi.";
     if (fileError) nextErrors.file = fileError;
     setErrors(nextErrors);
@@ -2186,11 +2231,18 @@ function OperatorFinalNumberPanel({ nomor, detail, setConfirm, onSubmitFinal, on
     setConfirm({
       title: "Simpan nomor surat?",
       body: `${nomor} akan diberi nomor surat ${trimmedNumber}. Dokumen final ${finalFile.name} tersimpan dan status ajuan menjadi Selesai.`,
-      onConfirm: () => {
+      onConfirm: async () => {
+        try {
+          await publishFinalLetter({ ...detail, nomor, status: 'Selesai', nomorSuratFinal: trimmedNumber, kodeUnik: trimmedCode, suratFinalOperator: finalAttachment }, 'ajuan');
+        } catch (error) {
+          setErrors({ api: error.message });
+          return;
+        }
         onSubmitFinal?.(nomor, {
           ...detail,
           status: "Selesai",
           nomorSuratFinal: trimmedNumber,
+          kodeUnik: trimmedCode,
           suratFinalOperator: finalAttachment,
           lampiranFinal: [finalAttachment],
           dinomoriOleh: "Rina Operator",
@@ -2222,11 +2274,26 @@ function OperatorFinalNumberPanel({ nomor, detail, setConfirm, onSubmitFinal, on
           />
           {errors.nomorSurat && <small className="fieldError">{errors.nomorSurat}</small>}
         </label>
+        <label>
+          <span className="fieldLabelInline">Kode Unik <span className="requiredMark">*</span></span>
+          <input
+            type="text"
+            name="kodeUnik"
+            value={kodeUnik}
+            onChange={(event) => setKodeUnik(event.target.value)}
+            placeholder="Masukkan kode unik surat"
+            required
+            aria-invalid={Boolean(errors.kodeUnik)}
+            aria-describedby={errors.kodeUnik ? "request-numbering-code-error" : undefined}
+          />
+          {errors.kodeUnik && <small id="request-numbering-code-error" className="fieldError">{errors.kodeUnik}</small>}
+        </label>
         <UploadDropzone label={<>Upload Dokumen <span className="uploadRequiredMark">*</span></>} name="finalDocument" accept=".pdf,application/pdf" formats="PDF. Maksimal 10 MB." />
         <div className="numberingNotice">
           <LineIcon name="info" />
           <span>Dokumen final yang diunggah operator akan menjadi file utama di portal user dan arsip.</span>
           {errors.file && <small className="fieldError">{errors.file}</small>}
+          {errors.api && <small role="alert" className="fieldError">{errors.api}</small>}
         </div>
         <button type="submit" className="primaryBtn"><LineIcon name="check" /> Simpan Nomor Surat</button>
       </form>
@@ -5467,7 +5534,7 @@ function AjuanSuratDetail({ ajuan, onBack, onContinue, onCreateRetry, setConfirm
   const isDraft = ajuan.status === "Draft";
   const [previewAttachment, setPreviewAttachment] = useState(null);
   const detailStatus = getAjuanDisplayStatus(ajuan);
-  const ajuanDetailStages = ["Draft", "Dikirim", "Approval", "Penomoran Surat", "Selesai"];
+  const ajuanDetailStages = ["Draft", "Dikirim", "Approval", "Pemomoran Surat dan Kode Unik", "Selesai"];
   const detailStageIndex = Math.min(getAjuanStageIndex(detailStatus), ajuanDetailStages.length - 1);
   const detailNeedsRevision = isAjuanRevisionStatus(ajuan.status);
   const rejectionNote = ajuan.catatanPimpinan || ajuan.catatanOperator || ajuan.catatanPenolakan || ajuan.rejectionNote || "";
@@ -8511,8 +8578,8 @@ function OutgoingLetterDetail({ detail, onBack, onRevise, onNumbering, backLabel
   const detailStageIndex = outgoingStageMap[detailStatus] ?? getAjuanStageIndex(detailStatus);
   const isRejected = isAjuanRevisionStatus(detailStatus);
   const outgoingStages = isRejected
-    ? ["Draft", "Ditolak", "Approval", "Penomoran Surat", "Selesai"]
-    : ["Draft", "Dikirim", "Approval", "Penomoran Surat", "Selesai"];
+    ? ["Draft", "Ditolak", "Approval", "Pemomoran Surat dan Kode Unik", "Selesai"]
+    : ["Draft", "Dikirim", "Approval", "Pemomoran Surat dan Kode Unik", "Selesai"];
   const needsNumbering = detail.status === "Disetujui";
   const rejectionNote = detail.catatanPimpinan || detail.catatanOperator || "";
   const finalAttachments = getAjuanFinalAttachments(detail);
@@ -8578,6 +8645,8 @@ function OutgoingLetterDetail({ detail, onBack, onRevise, onNumbering, backLabel
               <div className="dispositionNoteBox">
                 <small>Surat keluar selesai</small>
                 <strong>{detail.nomorFinal || detail.nomor}</strong>
+                <small>Kode Unik</small>
+                <strong>{detail.kodeUnik || "Belum diisi"}</strong>
                 <p>Surat final yang sudah diberi nomor oleh operator dapat dipratinjau atau diunduh.</p>
               </div>
               <div className="attachmentList">
@@ -8865,6 +8934,7 @@ function OutgoingLetterProcess({ detail, onBack, setConfirm, onUpdateOutgoing })
   const isRejected = detail.status === "Ditolak";
   const isApproved = detail.status === "Disetujui";
   const [finalNumber, setFinalNumber] = useState(detail.nomorFinal || "");
+  const [kodeUnik, setKodeUnik] = useState(detail.kodeUnik || "");
   const [processNote, setProcessNote] = useState(detail.catatanOperator || "");
   const [processError, setProcessError] = useState("");
   const [numberingErrors, setNumberingErrors] = useState({});
@@ -8950,8 +9020,10 @@ function OutgoingLetterProcess({ detail, onBack, setConfirm, onUpdateOutgoing })
     const formData = new FormData(form);
     const finalFile = formData.get("finalDocument");
     const trimmedNumber = finalNumber.trim();
+    const trimmedCode = kodeUnik.trim();
     const nextErrors = {};
     if (!trimmedNumber) nextErrors.nomorSurat = "Nomor surat wajib diisi untuk keabsahan surat.";
+    if (!trimmedCode) nextErrors.kodeUnik = "Kode unik wajib diisi.";
     const fileError = finalFile?.name ? validateUploadFile(finalFile) : "Upload dokumen final wajib diisi.";
     if (fileError) nextErrors.file = fileError;
     setNumberingErrors(nextErrors);
@@ -8965,10 +9037,17 @@ function OutgoingLetterProcess({ detail, onBack, setConfirm, onUpdateOutgoing })
     setConfirm({
       title: "Simpan surat keluar final?",
       body: `${detail.nomor} akan diberi nomor ${trimmedNumber}, dokumen final tersimpan, dan status menjadi Dikirim.`,
-      onConfirm: () => {
+      onConfirm: async () => {
+        try {
+          await publishFinalLetter({ ...detail, status: 'Dikirim', nomorFinal: trimmedNumber, kodeUnik: trimmedCode, suratFinalOperator: finalAttachment }, 'outgoing');
+        } catch (error) {
+          setProcessError(error.message);
+          return;
+        }
         onUpdateOutgoing?.(detail.nomor, {
           status: "Dikirim",
           nomorFinal: trimmedNumber,
+          kodeUnik: trimmedCode,
           suratFinalOperator: finalAttachment,
           lampiranFinal: [finalAttachment],
           dinomoriPada: processTime(),
@@ -9135,6 +9214,20 @@ function OutgoingLetterProcess({ detail, onBack, setConfirm, onUpdateOutgoing })
                     placeholder="Contoh: 001/STT-PU/VI/2026"
                   />
                   {numberingErrors.nomorSurat && <small className="fieldError">{numberingErrors.nomorSurat}</small>}
+                </label>
+                <label>
+                  <span className="fieldLabelInline">Kode Unik <span className="requiredMark">*</span></span>
+                  <input
+                    type="text"
+                    name="kodeUnik"
+                    value={kodeUnik}
+                    onChange={(event) => setKodeUnik(event.target.value)}
+                    placeholder="Masukkan kode unik surat"
+                    required
+                    aria-invalid={Boolean(numberingErrors.kodeUnik)}
+                    aria-describedby={numberingErrors.kodeUnik ? "outgoing-numbering-code-error" : undefined}
+                  />
+                  {numberingErrors.kodeUnik && <small id="outgoing-numbering-code-error" className="fieldError">{numberingErrors.kodeUnik}</small>}
                 </label>
                 <UploadDropzone label={<>Upload Dokumen <span className="uploadRequiredMark">*</span></>} name="finalDocument" accept=".pdf,application/pdf" formats="PDF. Maksimal 10 MB." />
                 <div className="numberingNotice">
