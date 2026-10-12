@@ -3,8 +3,8 @@ export async function requestLogin(baseUrl, username, password, {
   fetchImpl = globalThis.fetch,
   wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   attempts = 8,
-  probeTimeoutMs = 1500,
-  loginTimeoutMs = 15000
+  probeTimeoutMs = 5000,
+  loginTimeoutMs = 30000
 } = {}) {
   let ready = false;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -31,6 +31,12 @@ export async function requestLogin(baseUrl, username, password, {
     throw new Error("Koneksi login terputus atau server belum merespons. Silakan klik Login lagi tanpa perlu refresh halaman.");
   }
   const payload = await response.json().catch(() => ({}));
+  if ([502, 503, 504].includes(response.status)) {
+    throw new Error("Server login sedang tidak tersedia. Silakan klik Login lagi beberapa saat lagi. Pastikan run-all.cmd tetap berjalan.");
+  }
+  if (!response.ok && !payload.message) {
+    throw new Error(`Server login mengembalikan respons tidak valid (HTTP ${response.status}). Silakan coba lagi; jika berulang, jalankan kembali run-all.cmd.`);
+  }
   if (!response.ok) throw new Error(payload.message || "Login gagal. Silakan coba lagi.");
   if (!payload.token || !payload.user) throw new Error("Respons login tidak valid. Silakan coba lagi.");
   return payload;

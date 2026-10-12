@@ -1649,16 +1649,18 @@ function OperatorDashboard({ setView, ajuanRequests = [], outgoingLetters = [] }
       <section className="dashboardGrid">
         <article className="dashPanel">
           <PanelHeader title="Monitoring Ajuan Surat" action="Lihat semua" onClick={() => setView("Ajuan Masuk")} />
+          <div className="dashboardTableScroll">
           <table className="dashboardTable operatorWorkTable">
-            <thead><tr><th>Nomor</th><th>Jenis</th><th>Pengaju</th><th>Catatan</th><th>Status</th><th>Aksi</th></tr></thead>
+            <thead><tr><th>Jenis</th><th>Pengajuan</th><th>Catatan</th><th>Status</th><th>Aksi</th></tr></thead>
             <tbody>
               {verificationRows.map((row) => (
                 <tr key={row[0]}>
-                  <td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td><td><Status text={row[4]} /></td><td><button className="viewBtn" aria-label={`Lihat detail ${row[0]}`}><LineIcon name="eye" /></button></td>
+                  <td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td><td><Status text={row[4]} /></td><td><button className="viewBtn" aria-label={`Lihat detail ${row[0]}`}><LineIcon name="eye" /></button></td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </article>
 
         <article className="dashPanel trendPanel">
@@ -1747,11 +1749,11 @@ function PimpinanDashboard({ setView, ajuanRequests = [] }) {
           <PanelHeader title="Surat Masuk Perlu Review" action="Lihat semua" onClick={() => setView("Surat Masuk")} />
           <div className="dashboardTableScroll">
           <table className="dashboardTable pimpinanReviewTable">
-            <thead><tr><th>Agenda</th><th>Nomor Surat</th><th>Pengirim</th><th>Perihal</th><th>Status</th><th>Aksi</th></tr></thead>
+            <thead><tr><th>Nomor Surat</th><th>Pengirim</th><th>Perihal</th><th>Status</th><th>Aksi</th></tr></thead>
             <tbody>
               {reviewRows.map((row) => (
                 <tr key={row[0]}>
-                  <td>{row[0]}</td><td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td><td><Status text={row[4]} /></td><td><button className="viewBtn" aria-label={`Review ${row[0]}`}><LineIcon name="edit" /></button></td>
+                  <td>{row[1]}</td><td>{row[2]}</td><td>{row[3]}</td><td><Status text={row[4]} /></td><td><button className="viewBtn" aria-label={`Review surat ${row[1]}`}><LineIcon name="edit" /></button></td>
                 </tr>
               ))}
             </tbody>
@@ -3710,7 +3712,6 @@ function IncomingLetterForm({ role, setConfirm, onLocalDispositionCreated }) {
               <table>
                 <thead>
                   <tr>
-                    <th>Nomor Agenda</th>
                     <th>Asal Surat</th>
                     <th>Perihal</th>
                     <th>Tanggal Masuk</th>
@@ -3724,7 +3725,6 @@ function IncomingLetterForm({ role, setConfirm, onLocalDispositionCreated }) {
                     const [agenda, sender, subject, date, target, status] = row;
                     return (
                     <tr key={agenda}>
-                      <td>{agenda}</td>
                       <td>{sender}</td>
                       <td>{subject}</td>
                       <td>{date}</td>
@@ -4601,13 +4601,6 @@ function PimpinanIncomingProcess({ detail, onBack, onCreateDisposition, setConfi
   return (
     <section className="incomingPage processIncomingPage">
       <header className="processIncomingHeader">
-        <nav className="processBreadcrumb" aria-label="Breadcrumb">
-          <button type="button" onClick={onBack}><LineIcon name="arrowLeft" /> Disposisi</button>
-          <span>/</span>
-          <b>Proses Surat Masuk</b>
-          <span>/</span>
-          <b>Detail</b>
-        </nav>
         <div className="processTitleRow">
           <div>
             <h1>Proses Surat Masuk</h1>
@@ -7638,7 +7631,7 @@ function OperatorOutgoingList({ query, setQuery, outgoingLetters, onCreate, onDe
           <table className="dashboardTable ajuanHistoryTable operatorOutgoingTable">
             <thead>
               <tr>
-                {["No", "Nomor Surat", "Jenis Surat", "Perihal", "Tanggal Ajuan", "Status", "Aksi"].map((head) => <th key={head}>{head}</th>)}
+                {["No", "Nomor Surat", "Jenis Surat", "Perihal", "Tanggal", "Status", "Aksi"].map((head) => <th key={head}>{head}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -9285,10 +9278,12 @@ function Approval({ setConfirm, ajuanRequests = [], outgoingLetters = [], onUpda
   const approvalItems = [...ajuanApprovalItems, ...outgoingApprovalItems]
     .sort((a, b) => getApprovalSortTime(b.source) - getApprovalSortTime(a.source));
   const normalizedSearch = approvalSearch.trim().toLowerCase();
-  const filteredApprovalItems = approvalItems.filter(({ row }) => (
-    (!normalizedSearch || row.slice(0, 4).some((value) => String(value || "").toLowerCase().includes(normalizedSearch))) &&
+  const filteredApprovalItems = approvalItems.filter((item) => {
+    const { row } = item;
+    return (
+    (!normalizedSearch || [getApprovalLetterNumber(item), ...row.slice(1, 4)].some((value) => String(value || "").toLowerCase().includes(normalizedSearch))) &&
     (approvalFilter === "Semua Status" || row[4] === approvalFilter)
-  ));
+  ); });
   const approvalTotalPages = Math.max(Math.ceil(filteredApprovalItems.length / approvalPerPage), 1);
   const visibleApprovalItems = filteredApprovalItems.slice((approvalPage - 1) * approvalPerPage, approvalPage * approvalPerPage);
   const approvedCount = approvalItems.filter(({ row }) => row[4] === "Disetujui").length;
@@ -9349,6 +9344,12 @@ function ApprovalSummaryCard({ icon, tone, label, value, note, active, onClick }
   return <button type="button" className={`approvalSummaryCard ${tone}${active ? " active" : ""}`} onClick={onClick} aria-pressed={active}><span><LineIcon name={icon} /></span><div><small>{label}</small><strong>{value}</strong><p>{note}</p></div></button>;
 }
 
+function getApprovalLetterNumber({ source, type }) {
+  if (type === "ajuan") return getAjuanNomorSurat(source);
+  const number = String(source.nomorFinal || source.nomorSurat || source.letter_number || source.nomor || "").trim();
+  return !number || /^(DRAFT\/|AJ[-/]|AG[-/])/i.test(number) ? "-" : number;
+}
+
 function ApprovalTable({ items, onProcess, page, totalPages, totalCount, perPage, onPageChange }) {
   const rangeStart = totalCount ? (page - 1) * perPage + 1 : 0;
   const rangeEnd = Math.min(page * perPage, totalCount);
@@ -9358,7 +9359,7 @@ function ApprovalTable({ items, onProcess, page, totalPages, totalCount, perPage
         <table className="approvalTable approvalReferenceTable">
           <thead>
             <tr>
-              {["Nomor", "Jenis", "Pemohon", "Perihal", "Status"].map((head) => <th key={head}>{head}</th>)}
+              {["Nomor Surat", "Jenis", "Pemohon", "Perihal", "Status"].map((head) => <th key={head}>{head}</th>)}
               <th>Aksi</th>
             </tr>
           </thead>
@@ -9366,7 +9367,7 @@ function ApprovalTable({ items, onProcess, page, totalPages, totalCount, perPage
             {items.map((item) => {
               const { row, source } = item;
               return <tr key={`${item.type}-${row[0]}`}>
-                <td><strong>{row[0]}</strong><small>{source.tanggal || source.tanggalInput || "Tanggal belum tersedia"}</small></td>
+                <td><strong>{getApprovalLetterNumber(item)}</strong><small>{source.tanggal || source.tanggalInput || "Tanggal belum tersedia"}</small></td>
                 <td>{row[1]}</td>
                 <td><strong>{row[2]}</strong><small>{source.unit || source.tujuan || "-"}</small></td>
                 <td>{row[3]}</td>
@@ -9766,14 +9767,6 @@ function Reports({ setConfirm }) {
   const rejected = reportData.rows.filter((row) => ["Ditolak", "Dikembalikan"].includes(row[row.length - 1])).length;
   const updateFilter = (key) => (event) => setFilters((current) => ({ ...current, [key]: event.target.value }));
   const filenameBase = `laporan-${filters.type.toLowerCase().replaceAll(" ", "-")}-${filters.start}-${filters.end}`;
-  const exportExcel = () => {
-    const tableRows = [
-      reportData.heads,
-      ...reportData.rows
-    ].map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("");
-    const html = `<html><head><meta charset="utf-8" /></head><body><h2>Laporan Operasional</h2><p>Periode: ${escapeHtml(filters.start)} s/d ${escapeHtml(filters.end)}</p><p>Jenis: ${escapeHtml(filters.type)} | Status: ${escapeHtml(filters.status)}</p><table border="1">${tableRows}</table></body></html>`;
-    downloadBlob(`${filenameBase}.xls`, html, "application/vnd.ms-excel;charset=utf-8");
-  };
   const exportPdf = () => {
     const lines = [
       `Periode: ${filters.start} s/d ${filters.end}`,
@@ -9792,7 +9785,7 @@ function Reports({ setConfirm }) {
 
   return (
     <section className="tableShell">
-      <div className="rowBetween"><h3>Laporan Operasional</h3><div className="actions"><button className="softBtn" onClick={exportPdf}>Export PDF</button><button className="softBtn" onClick={exportExcel}>Export Excel</button></div></div>
+      <div className="rowBetween"><h3>Laporan Operasional</h3><div className="actions"><button className="softBtn" onClick={exportPdf}>Export PDF</button></div></div>
       <div className="formGrid">
         <label>Periode Mulai<input type="date" value={filters.start} onChange={updateFilter("start")} /></label>
         <label>Periode Selesai<input type="date" value={filters.end} onChange={updateFilter("end")} /></label>

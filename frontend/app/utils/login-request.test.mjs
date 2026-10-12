@@ -57,3 +57,25 @@ test('lost login response does not repeat a POST', async () => {
   }), /tanpa perlu refresh/);
   assert.equal(posts, 1);
 });
+
+for (const status of [502, 503, 504]) {
+  test(`explains proxy outage ${status} without treating it as wrong credentials`, async () => {
+    let posts = 0;
+    await assert.rejects(requestLogin('/api', 'operator', 'operator123', {
+      fetchImpl: async (url) => {
+        if (url.endsWith('/health')) return Response.json({ status: 'ok' });
+        posts += 1;
+        return new Response('Bad Gateway', { status });
+      }
+    }), /Server login sedang tidak tersedia/);
+    assert.equal(posts, 1);
+  });
+}
+
+test('reports a non-JSON login error with its HTTP status', async () => {
+  await assert.rejects(requestLogin('/api', 'operator', 'operator123', {
+    fetchImpl: async (url) => url.endsWith('/health')
+      ? Response.json({ status: 'ok' })
+      : new Response('<html>Server error</html>', { status: 500 })
+  }), /HTTP 500/);
+});
