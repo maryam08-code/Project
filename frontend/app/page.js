@@ -4831,8 +4831,8 @@ function PimpinanDispositionCreate({ onBack, setConfirm, sourceDetail = null }) 
 }
 
 function ArchiveHome({ ajuanRequests = [], outgoingLetters = [] }) {
+  const [archiveSearch, setArchiveSearch] = useState("");
   const [archiveFilter, setArchiveFilter] = useState(null);
-  const [archiveTypeFolder, setArchiveTypeFolder] = useState(null);
   const [archivePage, setArchivePage] = useState(1);
   const [archivePageSize, setArchivePageSize] = useState(10);
   const [previewDocument, setPreviewDocument] = useState(null);
@@ -4865,18 +4865,13 @@ function ArchiveHome({ ajuanRequests = [], outgoingLetters = [] }) {
     "Surat Masuk": "Surat Masuk",
     "Surat Keluar": "Surat Keluar"
   };
-  const getArchiveLetterTypeFolder = (row) => row[2] || row[1] || "Lainnya";
-  const archiveTypeFolders = Object.entries(
-    archiveRows.reduce((acc, row) => {
-      const folder = getArchiveLetterTypeFolder(row);
-      acc[folder] = (acc[folder] || 0) + 1;
-      return acc;
-    }, {})
-  );
+  const archiveSearchTerms = archiveSearch.trim().toLocaleLowerCase("id-ID").split(/\s+/).filter(Boolean);
   const filteredArchiveRows = archiveRows.filter((row) => {
     const matchesSummary = archiveFilter ? row[1] === archiveFilterMap[archiveFilter] : true;
-    const matchesTypeFolder = archiveTypeFolder ? getArchiveLetterTypeFolder(row) === archiveTypeFolder : true;
-    return matchesSummary && matchesTypeFolder;
+    const detail = row[6];
+    const searchableText = [row[2], detail?.judul, detail?.jenis, detail?.namaSurat, detail?.nama_surat].filter(Boolean).join(" ").toLocaleLowerCase("id-ID");
+    const matchesSearch = archiveSearchTerms.every((term) => searchableText.includes(term));
+    return matchesSummary && matchesSearch;
   });
   const totalArchivePages = Math.max(1, Math.ceil(filteredArchiveRows.length / archivePageSize));
   const visibleArchiveRows = filteredArchiveRows.slice((archivePage - 1) * archivePageSize, archivePage * archivePageSize);
@@ -4885,10 +4880,6 @@ function ArchiveHome({ ajuanRequests = [], outgoingLetters = [] }) {
   const archivePageItems = getPaginationItems(archivePage, totalArchivePages);
   const applyArchiveFilter = (filter) => {
     setArchiveFilter(filter);
-    setArchivePage(1);
-  };
-  const applyArchiveTypeFolder = (folder) => {
-    setArchiveTypeFolder(folder);
     setArchivePage(1);
   };
   const updateArchivePageSize = (event) => {
@@ -4949,38 +4940,36 @@ function ArchiveHome({ ajuanRequests = [], outgoingLetters = [] }) {
 
       <article className="ajuanHistory">
         <div className="panelHeader">
-          <h3>{archiveTypeFolder ? `Daftar Arsip - ${archiveTypeFolder}` : archiveFilter ? `Daftar Arsip - ${archiveFilter}` : "Daftar Arsip Otomatis"}</h3>
-          <button type="button" className="archiveResetBtn" onClick={() => { applyArchiveFilter(null); applyArchiveTypeFolder(null); }} aria-label="Tampilkan semua arsip">
+          <h3>{archiveFilter ? `Daftar Arsip - ${archiveFilter}` : "Daftar Arsip Otomatis"}</h3>
+          <button type="button" className="archiveResetBtn" onClick={() => { applyArchiveFilter(null); setArchiveSearch(""); }} aria-label="Tampilkan semua arsip">
             Semua arsip <span aria-hidden="true">-&gt;</span>
           </button>
+        </div>
+        <div className="archiveSearchBar">
+          <label htmlFor="archive-search">Cari berdasarkan nama surat</label>
+          <div className="archiveSearchControls">
+            <input
+              id="archive-search"
+              type="search"
+              placeholder="Masukkan nama surat, misalnya Surat Keterangan..."
+              value={archiveSearch}
+              onChange={(event) => { setArchiveSearch(event.target.value); setArchivePage(1); }}
+              aria-controls="archive-results"
+              aria-describedby="archive-search-note"
+            />
+            {archiveSearch && <button type="button" className="archiveResetBtn" onClick={() => { setArchiveSearch(""); setArchivePage(1); }}>Hapus pencarian</button>}
+          </div>
+          <small id="archive-search-note">Pencarian berdasarkan nama atau perihal surat, sesuai filter arsip aktif.</small>
+          <small role="status">{filteredArchiveRows.length} surat ditemukan{archiveFilter ? " dalam filter aktif" : ""}.</small>
         </div>
         <div className="archiveNotice">
           <LineIcon name="info" />
           <span>Ajuan Surat, Surat Masuk, dan Surat Keluar otomatis masuk arsip setelah operator menyimpan <strong>nomor surat</strong>.</span>
         </div>
-        <section className="dispositionFolderPanel archiveFolderPanel">
-          <div className="dispositionFolderHeader">
-            <h4>Folder Berdasarkan Jenis Surat</h4>
-            <button type="button" onClick={() => applyArchiveTypeFolder(null)}>Lihat semua folder <span aria-hidden="true">-&gt;</span></button>
-          </div>
-          <div className="dispositionFolderGrid archiveFolderGrid">
-            {archiveTypeFolders.map(([folder, count]) => (
-              <button
-                type="button"
-                className={archiveTypeFolder === folder ? "dispositionFolderItem active" : "dispositionFolderItem"}
-                key={folder}
-                onClick={() => applyArchiveTypeFolder(folder)}
-              >
-                <span><LineIcon name="folder" /></span>
-                <strong>{folder}</strong>
-                <small>{count}</small>
-              </button>
-            ))}
-          </div>
-        </section>
-        <table className="dashboardTable ajuanHistoryTable archiveTable">
+        <table id="archive-results" className="dashboardTable ajuanHistoryTable archiveTable">
           <thead><tr><th>Nomor Surat</th><th>Sumber</th><th>Perihal</th><th>Tanggal Arsip</th><th>Status</th><th>Aksi</th></tr></thead>
           <tbody>
+            {visibleArchiveRows.length === 0 && <tr><td colSpan={6}>Tidak ada surat yang sesuai dengan pencarian atau filter. Ubah kata kunci atau pilih Semua arsip.</td></tr>}
             {visibleArchiveRows.map((row) => {
               const [number, source, subject, date, , status] = row;
               const attachment = getArchiveRowAttachment(row);

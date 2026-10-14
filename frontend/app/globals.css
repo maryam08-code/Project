@@ -9031,6 +9031,44 @@ td {
   color: #0C61F1;
 }
 
+.archiveSearchBar {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.archiveSearchBar label {
+  font-weight: 600;
+}
+
+.archiveSearchControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.archiveSearchControls input {
+  flex: 1 1 260px;
+  min-width: 0;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #9ab5ff;
+  border-radius: 12px;
+  font: inherit;
+  color: inherit;
+  background: #fff;
+}
+
+.archiveSearchControls input:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.archiveSearchBar small {
+  color: #4664a8;
+}
+
 .archiveNotice {
   display: flex;
   align-items: center;
@@ -9550,14 +9588,6 @@ td {
   font-weight: 900;
 }
 
-.archiveFolderPanel {
-  margin: 14px 0 16px;
-}
-
-.archiveFolderGrid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
 @media (max-width: 900px) {
   .dispositionStatsGrid,
   .dispositionDashboardGrid,
@@ -9565,7 +9595,6 @@ td {
     grid-template-columns: 1fr;
   }
 
-  .archiveFolderGrid,
   .dispositionFolderGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
