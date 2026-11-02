@@ -17,7 +17,7 @@ usersRouter.get("/", requireAuth, requireRole("administrator"), async (request, 
     let paramIndex = 1;
 
     if (search) {
-      conditions.push(`(users.full_name ILIKE $${paramIndex} OR users.username ILIKE $${paramIndex} OR users.email ILIKE $${paramIndex})`);
+      conditions.push(`(users.full_name ILIKE $${paramIndex} OR users.username ILIKE $${paramIndex})`);
       values.push(`%${search}%`);
       paramIndex++;
     }
@@ -64,7 +64,7 @@ usersRouter.get("/", requireAuth, requireRole("administrator"), async (request, 
 
 usersRouter.post("/", requireAuth, requireRole("administrator"), async (request, response, next) => {
   try {
-    const { fullName, username, email, password, role, unit, position, status = "aktif" } = request.body || {};
+    const { fullName, username, password, role, unit, position, status = "aktif" } = request.body || {};
     const requiredErrors = {};
     if (!fullName) requiredErrors.fullName = "Nama lengkap wajib diisi.";
     if (!username) requiredErrors.username = "Username wajib diisi.";
@@ -102,7 +102,7 @@ usersRouter.post("/", requireAuth, requireRole("administrator"), async (request,
         `INSERT INTO users (role_id, unit_id, full_name, username, email, password_hash, position, status, must_change_password, created_by)
          VALUES ($1, $2, $3, $4, NULLIF($5, ''), crypt($6, gen_salt('bf')), $7, $8, true, $9)
          RETURNING id, full_name, username, email, position, status`,
-        [selectedRole.id, unitId, fullName, username, email || null, password, position || null, accountStatus, request.user.id]
+        [selectedRole.id, unitId, fullName, username, null, password, position || null, accountStatus, request.user.id]
       );
 
       return { ...insertResult.rows[0], role: selectedRole.name, unit: unit || null };
@@ -131,22 +131,18 @@ usersRouter.post("/", requireAuth, requireRole("administrator"), async (request,
   }
 });
 
-usersRouter.put("/:id", requireAuth, async (request, response, next) => {
+usersRouter.put("/:id", requireAuth, requireRole("administrator"), async (request, response, next) => {
   try {
     const { id } = request.params;
-    const isSelf = String(request.user.id) === String(id);
-    const isAdmin = request.user.role_code === "administrator";
+    const { fullName: rawName, role: rawRoleInput, unit: rawUnit } = request.body || {};
+    const fullName = typeof rawName === "string" ? rawName.trim() : "";
+    const role = typeof rawRoleInput === "string" ? rawRoleInput.trim() : "";
+    const unit = typeof rawUnit === "string" ? rawUnit.trim() : "";
 
-    if (!isAdmin && !isSelf) {
-      return response.status(403).json({ message: "Akses ditolak. Anda tidak memiliki izin untuk aksi ini." });
-    }
-
-    const { fullName, email, password, role, unit, position, status } = request.body || {};
-    
     const requiredErrors = {};
-    if (!fullName) requiredErrors.fullName = "Nama lengkap wajib diisi.";
-    if (isAdmin && !isSelf && !role) requiredErrors.role = "Role wajib diisi.";
-    if (isAdmin && !String(unit || "").trim()) requiredErrors.unit = "Unit kerja wajib diisi.";
+    if (!fullName || fullName.length > 150) requiredErrors.fullName = "Nama lengkap wajib diisi, maksimal 150 karakter.";
+    if (!role) requiredErrors.role = "Role wajib diisi.";
+    if (!unit || unit.length > 150) requiredErrors.unit = "Unit kerja wajib diisi, maksimal 150 karakter.";
     if (Object.keys(requiredErrors).length > 0) {
       return response.status(422).json({ message: "Validasi gagal.", errors: requiredErrors });
     }
@@ -166,9 +162,8 @@ usersRouter.put("/:id", requireAuth, async (request, response, next) => {
         throw error;
       }
 
-      const rawRole = String(isAdmin ? (role || existingUser.role_name) : existingUser.role_name);
+      const rawRole = String(role);
       const roleCode = rawRole.toLowerCase() === "admin" ? "administrator" : rawRole.toLowerCase();
-      const accountStatus = isAdmin ? (status ? String(status).toLowerCase() : existingUser.status) : existingUser.status;
 
       const roleResult = await client.query("SELECT id, code, name FROM roles WHERE code = $1 OR lower(name) = $1", [roleCode]);
       const selectedRole = roleResult.rows[0];
@@ -194,21 +189,10 @@ usersRouter.put("/:id", requireAuth, async (request, response, next) => {
          SET role_id = $1,
              unit_id = COALESCE($2, unit_id),
              full_name = $3,
-             email = NULLIF($4, ''),
-             position = $5,
-             status = $6,
-             password_hash = CASE
-               WHEN NULLIF(BTRIM($7), '') IS NOT NULL THEN crypt(BTRIM($7), gen_salt('bf'))
-               ELSE password_hash
-             END,
-             must_change_password = CASE
-               WHEN NULLIF(BTRIM($7), '') IS NOT NULL THEN true
-               ELSE must_change_password
-             END,
              updated_at = now()
-         WHERE id = $8 AND deleted_at IS NULL
+         WHERE id = $4 AND deleted_at IS NULL
          RETURNING id, full_name, username, email, position, status`,
-        [selectedRole.id, unitId, fullName, email || null, position || null, accountStatus, password || null, id]
+        [selectedRole.id, unitId, fullName, id]
       );
 
       return { ...updateResult.rows[0], role: selectedRole.name, unit: unit || null };

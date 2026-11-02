@@ -10,7 +10,7 @@ authRouter.post("/login", async (request, response, next) => {
   try {
     const { username, password } = request.body || {};
     if (!username || !password) {
-      return response.status(422).json({ message: "Username/email dan password wajib diisi." });
+      return response.status(422).json({ message: "Username dan password wajib diisi." });
     }
 
     const result = await query(
@@ -20,7 +20,7 @@ authRouter.post("/login", async (request, response, next) => {
        FROM users
        JOIN roles ON roles.id = users.role_id
        LEFT JOIN units ON units.id = users.unit_id
-       WHERE (users.username = $1 OR users.email = $1)
+       WHERE users.username = $1
          AND users.password_hash = crypt($2, users.password_hash)
          AND users.deleted_at IS NULL`,
       [username, password]
@@ -60,19 +60,15 @@ authRouter.get("/me", requireAuth, (request, response) => {
 authRouter.put("/me", requireAuth, async (request, response, next) => {
   try {
     const fullName = typeof request.body?.fullName === "string" ? request.body.fullName.trim() : "";
-    const email = typeof request.body?.email === "string" ? request.body.email.trim() : "";
     if (!fullName || fullName.length > 150) {
       return response.status(422).json({ message: "Nama lengkap wajib diisi, maksimal 150 karakter." });
     }
-    if (email && (email.length > 150 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
-      return response.status(422).json({ message: "Format email tidak valid, maksimal 150 karakter." });
-    }
     const updated = await withTransaction(async (client) => {
       const result = await client.query(
-        `UPDATE users SET full_name = $1, email = NULLIF($2, ''), updated_at = now()
-         WHERE id = $3 AND deleted_at IS NULL
+        `UPDATE users SET full_name = $1, updated_at = now()
+         WHERE id = $2 AND deleted_at IS NULL
          RETURNING full_name, email`,
-        [fullName, email, request.user.id]
+        [fullName, request.user.id]
       );
       await client.query(
         `INSERT INTO audit_logs (user_id, activity, module, data_id, data_label, ip_address, user_agent)

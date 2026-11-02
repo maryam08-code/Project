@@ -956,7 +956,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     const loginPassword = String(form.get("password") || "");
     const nextErrors = {};
 
-    if (!loginUsername) nextErrors.username = "Username/email wajib diisi.";
+    if (!loginUsername) nextErrors.username = "Username wajib diisi.";
     if (!loginPassword) nextErrors.password = "Password wajib diisi.";
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
@@ -981,22 +981,20 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     event.preventDefault();
     const identifier = resetIdentifier.trim();
     if (!identifier) {
-      setErrors({ reset: "Username atau email wajib diisi." });
+      setErrors({ reset: "Username wajib diisi." });
       return;
     }
 
     const account = dummyLoginUsers.find((item) => {
       const value = identifier.toLowerCase();
-      return item.username === value || item.user.email?.toLowerCase() === value;
+      return item.username === value;
     });
 
     setErrors({});
     setResetSent(true);
     setConfirm({
       title: "Permintaan reset password dikirim",
-      body: account
-        ? `Instruksi reset password untuk ${account.user.full_name} sudah dibuat. Pada implementasi produksi, tautan reset dikirim ke ${account.user.email}.`
-        : "Jika akun terdaftar, instruksi reset password akan dikirim ke email yang sesuai."
+      body: "Hubungi Administrator untuk mereset password akun Anda."
     });
   }
 
@@ -1130,7 +1128,6 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
           body: JSON.stringify({
             fullName: user.name,
             username: user.username,
-            email: user.email,
             password: user.password,
             role: user.role,
             unit: user.unit,
@@ -1161,12 +1158,8 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
           method: "PUT",
           body: JSON.stringify({
             fullName: user.name,
-            email: user.email,
-            password: user.password,
             role: user.role,
-            unit: user.unit,
-            position: user.jabatan,
-            status: user.status === "Aktif" ? "aktif" : "nonaktif"
+            unit: user.unit
           })
         });
         await loadUsers();
@@ -1185,9 +1178,6 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
           nextRow[1] = user.name;
           nextRow[2] = user.role;
           nextRow[3] = user.unit || "-";
-          nextRow[4] = user.status;
-          nextRow[5] = user.email || "";
-          nextRow[7] = user.jabatan || "";
           return nextRow;
         }
         return row;
@@ -1320,11 +1310,11 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
           <div className="loginCard">
             <div className="loginIcon" aria-hidden="true"><LineIcon name="bank" /></div>
             <h2>{forgotMode ? "Reset Password" : "Login E-Office"}</h2>
-            <p className="muted">{forgotMode ? "Masukkan username atau email akun untuk menerima instruksi pemulihan." : "Silakan masuk untuk melanjutkan"}</p>
+            <p className="muted">{forgotMode ? "Hubungi Administrator untuk mereset password akun Anda." : "Silakan masuk untuk melanjutkan"}</p>
             {forgotMode ? (
               <form onSubmit={submitForgotPassword} noValidate>
-                <LoginField label="Email / Username" error={errors.reset} icon="user">
-                  <input name="resetIdentifier" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="Masukkan email atau username" />
+                <LoginField label="Username" error={errors.reset} icon="user">
+                  <input name="resetIdentifier" value={resetIdentifier} onChange={(event) => setResetIdentifier(event.target.value)} placeholder="Masukkan username" />
                 </LoginField>
                 {resetSent && <small className="loginSuccessText">Permintaan reset password sudah dicatat.</small>}
                 <button className="primaryBtn">Kirim Instruksi Reset</button>
@@ -1332,8 +1322,8 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
               </form>
             ) : (
               <form onSubmit={login} noValidate>
-                <LoginField label="Email / Username" error={errors.username} icon="user">
-                  <input name="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Masukkan email atau username" />
+                <LoginField label="Username" error={errors.username} icon="user">
+                  <input name="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Masukkan username" />
                 </LoginField>
                 <LoginField
                   label="Password"
@@ -1613,7 +1603,7 @@ function buildOperatorNotices(ajuanRequests = [], outgoingLetters = []) {
 function OperatorDashboard({ setView, ajuanRequests = [], outgoingLetters = [] }) {
   const cards = [
     ["Ajuan Masuk", "27", "Monitoring ajuan", "inbox", "blue", "Ajuan Masuk"],
-    ["Surat Masuk", "124", "Email dan manual", "mail", "purple", "Surat Masuk"],
+    ["Surat Masuk", "124", "Registrasi surat", "mail", "purple", "Surat Masuk"],
     ["Surat Keluar", "76", "9 menunggu approval", "send", "green", "Surat Keluar"],
     ["Perlu Penomoran", "11", "Menunggu nomor surat", "clock", "orange", "Ajuan Masuk"]
   ];
@@ -4292,7 +4282,6 @@ function PimpinanIncomingReview({ setConfirm, onLocalDispositionCreated }) {
       subject: detail.perihal,
       instruction: form.instruction,
       targetName: form.targetName,
-      priority: form.priority,
       due_date: form.dueDate,
       status: "dikirim",
       giver_name: "Dewi Pimpinan",
@@ -4309,8 +4298,7 @@ function PimpinanIncomingReview({ setConfirm, onLocalDispositionCreated }) {
           dispositionNumber,
           instruction: form.instruction,
           targetName: form.targetName,
-          dueDate: form.dueDate,
-          priority: form.priority
+          dueDate: form.dueDate
         })
       });
       const saved = payload.data || localDisposition;
@@ -4545,7 +4533,6 @@ function PimpinanIncomingProcess({ detail, onBack, onCreateDisposition, setConfi
   const [instruction, setInstruction] = useState("");
   const [targetName, setTargetName] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [priority, setPriority] = useState("biasa");
   const infoRows = [
     ["Nomor Agenda", detail.agenda],
     ["Tanggal Terima", detail.tanggalTerima],
@@ -4593,8 +4580,7 @@ function PimpinanIncomingProcess({ detail, onBack, onCreateDisposition, setConfi
     onCreateDisposition({
       instruction: trimmedInstruction,
       targetName,
-      dueDate,
-      priority
+      dueDate
     });
   }
 
@@ -4656,14 +4642,6 @@ function PimpinanIncomingProcess({ detail, onBack, onCreateDisposition, setConfi
               <label>
                 <span>Batas Waktu</span>
                 <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
-              </label>
-              <label>
-                <span>Prioritas</span>
-                <select value={priority} onChange={(event) => setPriority(event.target.value)}>
-                  <option value="biasa">Normal</option>
-                  <option value="penting">Penting</option>
-                  <option value="segera">Segera</option>
-                </select>
               </label>
             </div>
             <div className="processActions">
@@ -4784,14 +4762,6 @@ function PimpinanDispositionCreate({ onBack, setConfirm, sourceDetail = null }) 
               <label>
                 Batas Waktu
                 <input type="date" defaultValue="2026-05-20" />
-              </label>
-              <label>
-                Prioritas
-                <select defaultValue={source.sifat?.toLowerCase() || "penting"}>
-                  <option value="biasa">Biasa</option>
-                  <option value="penting">Penting</option>
-                  <option value="segera">Segera</option>
-                </select>
               </label>
               <label>
                 Status Awal
@@ -6120,7 +6090,6 @@ function DisposisiMasukHome({ setConfirm, viewMode = "disposition" }) {
       ["Tanggal Surat", followupDraft.tanggalSurat],
       ["Pengirim", followupDraft.pengirim],
       ["Perihal", followupDraft.perihal],
-      ["Sifat", followupDraft.prioritas || "Biasa"],
       ["Lampiran", `${followupDraft.lampiran?.length || 0} berkas`]
     ];
     const instructionColumns = [
@@ -6274,7 +6243,6 @@ function DisposisiMasukHome({ setConfirm, viewMode = "disposition" }) {
       ["Tanggal Surat", selectedDocument.tanggalSurat],
       ["Pengirim", selectedDocument.pengirim],
       ["Perihal", selectedDocument.perihal],
-      ["Sifat", selectedDocument.prioritas || "Biasa"],
       ["Lampiran", `${selectedDocument.lampiran.length} berkas`]
     ];
 
@@ -6630,7 +6598,7 @@ function AdminUserManagement({
                 setUserParams(prev => ({ ...prev, search: val, page: 1 }));
               }
             }}
-            placeholder="Cari nama, email, username..."
+            placeholder="Cari nama atau username..."
             className="adminUsersSearch"
             style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #ddd", fontSize: "14px", flex: 1 }}
           />
@@ -6676,14 +6644,13 @@ function AdminUserManagement({
         <div className="adminUsersTableWrap">
           <table className="adminUsersTable">
             <thead>
-              <tr><th>No</th><th>Nama</th><th>Email</th><th>Role</th><th>Unit Kerja</th><th>Status</th><th>Aksi</th></tr>
+              <tr><th>No</th><th>Nama</th><th>Role</th><th>Unit Kerja</th><th>Status</th><th>Aksi</th></tr>
             </thead>
             <tbody>
               {visibleRows.map((row, index) => (
                 <tr key={row[0]}>
                   <td>{start + index}</td>
                   <td><strong>{row[1]}</strong></td>
-                  <td>{userEmail(row)}</td>
                   <td><span className={`adminUsersBadge role ${roleTone(row[2])}`}>{row[2]}</span></td>
                   <td>{row[3] || "-"}</td>
                   <td><span className={`adminUsersBadge status ${adminUserStatusTone(row[4])}`}>{row[4]}</span></td>
@@ -6735,7 +6702,7 @@ function AdminUserManagement({
                 </tr>
               ))}
               {visibleRows.length === 0 && (
-                <tr><td colSpan={7} className="adminUsersEmpty">Belum ada pengguna yang terdaftar.</td></tr>
+                <tr><td colSpan={6} className="adminUsersEmpty">Belum ada pengguna yang terdaftar.</td></tr>
               )}
             </tbody>
           </table>
@@ -7712,7 +7679,6 @@ function AdminUserCreate({ onCancel, onCreateUser, initialData }) {
     const form = new FormData(event.currentTarget);
     const name = String(form.get("name") || "").trim();
     const username = isEdit ? initialData.username : String(form.get("username") || "").trim();
-    const email = String(form.get("email") || "").trim();
     const password = String(form.get("password") || "").trim();
     const role = String(form.get("role") || "").trim();
     const status = String(form.get("status") || "Aktif").trim();
@@ -7721,7 +7687,7 @@ function AdminUserCreate({ onCancel, onCreateUser, initialData }) {
     if (!name || (!isEdit && (!username || !password)) || !role || !unit) return;
     setSaving(true);
     try {
-      await onCreateUser({ name, username, email, password, role, status, unit, jabatan });
+      await onCreateUser(isEdit ? { name, role, unit } : { name, username, password, role, status, unit, jabatan });
     } finally {
       setSaving(false);
     }
@@ -7733,7 +7699,7 @@ function AdminUserCreate({ onCancel, onCreateUser, initialData }) {
         <div>
           <button type="button" className="backLink" onClick={onCancel}><LineIcon name="arrowLeft" /> Kembali ke Daftar Pengguna</button>
           <h1>{isEdit ? "Edit User" : "Add User"}</h1>
-          <p>{isEdit ? "Ubah detail informasi akun pengguna dan atur unit kerja." : "Tambahkan akun pengguna baru dan atur role sesuai hak akses sistem."}</p>
+          <p>{isEdit ? "Hanya nama lengkap, role, dan unit kerja yang dapat diubah." : "Tambahkan akun pengguna baru dan atur role sesuai hak akses sistem."}</p>
         </div>
       </header>
 
@@ -7743,17 +7709,14 @@ function AdminUserCreate({ onCancel, onCreateUser, initialData }) {
             <h2><LineIcon name="user" /> Informasi Akun</h2>
             <div className="adminUserFields">
               <label>Nama Lengkap <span>*</span>
-                <input name="name" defaultValue={initialData?.name || ""} placeholder="Masukkan nama lengkap" required />
+                <input name="name" maxLength={150} defaultValue={initialData?.name || ""} placeholder="Masukkan nama lengkap" required />
               </label>
               <label>Username <span>*</span>
                 <input name="username" defaultValue={initialData?.username || ""} placeholder="Contoh: operator2" disabled={isEdit} required={!isEdit} />
               </label>
-              <label>Email
-                <input name="email" type="email" defaultValue={initialData?.email || ""} placeholder="nama@instansi.ac.id" />
-              </label>
-              <label>{isEdit ? "Password Baru (Kosongkan jika tidak diubah)" : <>Password <span>*</span></>}
+              {!isEdit && <label>Password <span>*</span>
                 <input name="password" type="password" placeholder={isEdit ? "Masukkan password baru jika ingin mengubah" : "Masukkan password awal"} required={!isEdit} />
-              </label>
+              </label>}
             </div>
           </article>
 
@@ -7770,13 +7733,13 @@ function AdminUserCreate({ onCancel, onCreateUser, initialData }) {
                 </select>
               </label>
               <label>Status <span>*</span>
-                <select name="status" defaultValue={initialData?.status || "Aktif"}>
+                <select disabled={isEdit} name="status" defaultValue={initialData?.status || "Aktif"}>
                   <option>Aktif</option>
                   <option>Nonaktif</option>
                 </select>
               </label>
               <label>Unit Kerja <span>*</span>
-                <input name="unit" defaultValue={initialData?.unit || ""} placeholder="Contoh: Tata Usaha" required />
+                <input name="unit" maxLength={150} defaultValue={initialData?.unit || ""} placeholder="Contoh: Tata Usaha" required />
               </label>
             </div>
           </article>
@@ -7843,9 +7806,6 @@ function AdminUserPasswordReset({ row, onCancel, onResetPassword }) {
             <div className="adminUserFields">
               <label>Nama Pengguna
                 <input value={row[1]} readOnly />
-              </label>
-              <label>Email
-                <input value={userEmail(row)} readOnly />
               </label>
               <label>Role
                 <input value={row[2]} readOnly />
@@ -8082,7 +8042,6 @@ function PimpinanDispositionDetail({ detail, onBack }) {
           <article className="dispositionSourceCard">
             <div className="rowBetween">
               <h2><LineIcon name="clipboard" /> Informasi Disposisi</h2>
-              <span className={detail.prioritas === "Segera" ? "priority high" : "priority"}>{detail.prioritas}</span>
             </div>
             <div className="dispositionSourceRows">
               <DetailItem icon="info" label="ID Disposisi" value={detail.id} />
@@ -8154,7 +8113,6 @@ function PimpinanDispositionProcess({ detail, onBack, setConfirm }) {
           <article className="dispositionSourceCard">
             <div className="rowBetween">
               <h2><LineIcon name="mail" /> Surat Sumber</h2>
-              <span className={detail.prioritas === "Segera" ? "priority high" : "priority"}>{detail.prioritas}</span>
             </div>
             <div className="dispositionSourceRows">
               <DetailItem icon="info" label="ID Disposisi" value={detail.id} />
@@ -8191,14 +8149,6 @@ function PimpinanDispositionProcess({ detail, onBack, setConfirm }) {
               <label>
                 Batas Waktu
                 <input type="date" defaultValue="2026-05-20" />
-              </label>
-              <label>
-                Prioritas
-                <select defaultValue={detail.prioritas.toLowerCase()}>
-                  <option value="biasa">Biasa</option>
-                  <option value="penting">Penting</option>
-                  <option value="segera">Segera</option>
-                </select>
               </label>
             </section>
 
@@ -10080,7 +10030,6 @@ function Notifications({ notifications = [], meta = {}, loading, onOpen }) {
 function ProfileSettings({ onProfileUpdated }) {
   const [profile, setProfile] = useState(null);
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -10091,7 +10040,6 @@ function ProfileSettings({ onProfileUpdated }) {
       const next = userProfile(user);
       setProfile(next);
       setName(next.name);
-      setEmail(next.email);
       onProfileUpdated(user);
     }).catch((failure) => {
       if (active) setError(failure.message);
@@ -10111,12 +10059,11 @@ function ProfileSettings({ onProfileUpdated }) {
     setSaving(true);
     try {
       const { user } = await apiFetch("/auth/me", {
-        method: "PUT", body: JSON.stringify({ fullName: name.trim(), email: email.trim() })
+        method: "PUT", body: JSON.stringify({ fullName: name.trim() })
       });
       const next = userProfile(user);
       setProfile(next);
       setName(next.name);
-      setEmail(next.email);
       onProfileUpdated(user);
       setNotice("Perubahan profil berhasil disimpan.");
     } catch (failure) {
@@ -10149,7 +10096,6 @@ function ProfileSettings({ onProfileUpdated }) {
             <div className="formGrid">
               <label>Nama Lengkap<input name="name" value={name} onChange={(event) => setName(event.target.value)} required maxLength={150} disabled={saving} /></label>
               <label>Username<input value={profile.username} readOnly /></label>
-              <label>Email<input name="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={150} disabled={saving} /></label>
               <label>Role<input value={profile.role} readOnly /></label>
               <label>Unit Kerja<input value={profile.unit} readOnly /></label>
               <label>Jabatan<input value={profile.position} readOnly /></label>
