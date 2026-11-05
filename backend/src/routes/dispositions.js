@@ -127,7 +127,7 @@ dispositionsRouter.get("/", requireAuth, requireRole("administrator", "operator"
     }
 
     const result = await query(
-      `SELECT dispositions.id, dispositions.disposition_number, dispositions.incoming_letter_id,
+      `SELECT dispositions.id, dispositions.number, dispositions.disposition_number, dispositions.incoming_letter_id,
               dispositions.instruction, dispositions.priority, dispositions.status, dispositions.due_date,
               dispositions.sent_at,
               incoming_letters.agenda_number, incoming_letters.letter_number, incoming_letters.sender,

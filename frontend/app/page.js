@@ -2,9 +2,31 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ownedRequests, activitySummary } from "./utils/user-activity.mjs";
+import { compactLetterPayload, letterIdentityKey } from "./utils/letter-persistence.mjs";
 import { userProfile } from "./utils/user-profile.mjs";
 import { requestLogin } from "./utils/login-request.mjs";
 import { NotificationProvider, NotificationBell, NotificationPage } from "./components/notification-center";
+
+// Real sessions use database numbers. Browser numbering is retained for demo mode.
+const databaseRecordNumbers = new Map();
+
+function rememberDatabaseNumber(entity, record) {
+  databaseRecordNumbers.set(`${entity}:${record.nomor}`, record.number);
+  return record;
+}
+
+function localRecordNumber(entity, identity) {
+  if (typeof window !== "undefined" && getStoredToken() && !isDummyToken()) return databaseRecordNumbers.get(`${entity}:${identity}`) || "-";
+  if (!identity || typeof window === "undefined") return "-";
+  const key = `eoffice_record_numbers_${entity}`;
+  const registry = readLocalJson(key, {});
+  const recordKey = String(identity);
+  if (!Object.prototype.hasOwnProperty.call(registry, recordKey)) {
+    registry[recordKey] = Object.values(registry).reduce((max, value) => Math.max(max, Number(value) || 0), 0) + 1;
+    writeLocalJson(key, registry);
+  }
+  return registry[recordKey];
+}
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "/api").replace(/\/$/, "");
 const AUTH_TOKEN_KEY = "eoffice_auth_token";
@@ -270,12 +292,13 @@ function stripAttachmentPayload(attachment) {
 async function hydrateAttachmentPayload(attachment) {
   if (!attachment) return attachment;
   const [name, size, meta, dataUrl, mime, storageKey] = attachment;
-  if (dataUrl || !storageKey) return attachment;
+  if (attachment[6] || dataUrl || !storageKey) return attachment;
   const storedDataUrl = await getAttachmentPayload(storageKey);
   return [name, size, meta, storedDataUrl, mime, storageKey];
 }
 
 function normalizeAjuanWorkflowStatus(requests) {
+  [...requests].reverse().forEach((item) => localRecordNumber("letter_requests", item.nomor));
   const normalizedRequests = requests.filter((request) => !isRemovedAjuanRequest(request)).map((request) => {
     if (request.status === "Ajuan Baru" && hasUploadedAjuanDocument(request)) {
       return { ...request, status: "Menunggu Approval", diteruskanKe: request.diteruskanKe || "Dewi Pimpinan" };
@@ -314,12 +337,7 @@ function isRemovedAjuanRequest(request) {
 }
 
 function getAjuanIdentityKey(request) {
-  return [
-    request?.ownerId || request?.pemohon || "",
-    request?.jenis || "",
-    request?.judul || request?.keterangan || "",
-    request?.tujuan || ""
-  ].map((value) => String(value).trim().toLowerCase()).join("|");
+  return letterIdentityKey(request);
 }
 
 function isDummyToken(token = getStoredToken()) {
@@ -354,7 +372,7 @@ async function loginBackendSession(username, password) {
 }
 
 async function publishFinalLetter(detail, sourceType) {
-  const attachment = await hydrateAttachmentPayload(detail.suratFinalOperator || detail.lampiranFinal?.[0]);
+  const attachment = await hydrateAuthorizedAttachment(detail.suratFinalOperator || detail.lampiranFinal?.[0]);
   if (!attachment?.[3]) throw new Error('Dokumen final tidak tersedia. Unggah kembali dokumen final agar surat dapat diverifikasi.');
   return apiFetch('/final-letters', {
     method: 'POST',
@@ -432,13 +450,13 @@ function formatJakartaInputDate(value) {
 
 function mapApiUserToRow(user) {
   return [
-    String(user.id || "").slice(0, 8).toUpperCase(),
+    user.number || "-",
     user.full_name || "-",
     user.role || user.role_name || "-",
     user.unit || "-",
     toTitleCase(user.status),
     user.email || "",
-    { id: user.id, username: user.username },
+    { id: user.id, username: user.username, number: user.number },
     user.position || ""
   ];
 }
@@ -582,21 +600,23 @@ const demoNotifications = [
 ];
 
 const tableHeads = {
-  "Ajuan Surat": ["Nomor", "Jenis", "Perihal", "Pengaju", "Status"],
-  "Ajuan Masuk": ["Nomor", "Jenis", "Perihal", "Pengaju", "Status"],
+  "Ajuan Surat": ["Nomor Ajuan", "Jenis", "Perihal", "Pengaju", "Status"],
+  "Ajuan Masuk": ["Nomor Ajuan", "Jenis", "Perihal", "Pengaju", "Status"],
   "Surat Masuk": ["Agenda", "Nomor Surat", "Pengirim", "Perihal", "Status"],
-  "Surat Keluar": ["Nomor", "Jenis", "Tujuan", "Perihal", "Status"],
-  Disposisi: ["ID", "Nomor Surat", "Tujuan", "Instruksi", "Status"],
+  "Surat Keluar": ["Nomor Surat", "Jenis", "Tujuan", "Perihal", "Status"],
+  Disposisi: ["Kode Disposisi", "Nomor Surat", "Tujuan", "Instruksi", "Status"],
   Arsip: ["Kode", "Tipe", "Perihal", "Format", "Status"],
   "Arsip Digital": ["Kode", "Tipe", "Perihal", "Format", "Status"],
-  "Konsep Surat": ["Nomor", "Jenis", "Perihal", "Pengaju", "Status"],
-  "Status Ajuan": ["Nomor", "Jenis", "Perihal", "Pengaju", "Status"],
-  Pengguna: ["ID", "Nama", "Role", "Unit Kerja", "Status"],
+  "Konsep Surat": ["Nomor Ajuan", "Jenis", "Perihal", "Pengaju", "Status"],
+  "Status Ajuan": ["Nomor Ajuan", "Jenis", "Perihal", "Pengaju", "Status"],
+  Pengguna: ["Nomor", "Nama", "Role", "Unit Kerja", "Status"],
   "Audit Trail": ["Waktu", "User", "Modul", "Aktivitas"]
 };
 
 function outgoingLetterToRow(letter) {
-  return [letter.nomor, letter.jenis, letter.tujuan, letter.perihal, letter.status];
+  const row = [letter.nomor, letter.jenis, letter.tujuan, letter.perihal, letter.status];
+  row.number = localRecordNumber("outgoing_letters", letter.nomor);
+  return row;
 }
 
 const outgoingDisplayDates = {
@@ -615,6 +635,7 @@ function getOutgoingDisplayDate(letter) {
 }
 
 function normalizeOutgoingWorkflowStatus(letters) {
+  [...letters].reverse().forEach((item) => localRecordNumber("outgoing_letters", item.nomor));
   return letters.map((letter) => ({
     ...letter,
     status: letter.status === "Diperiksa" ? "Menunggu Approval" : letter.status
@@ -726,7 +747,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
   const setConfirm = useCallback((value) => {
     if (["User", "Pimpinan"].includes(role)) {
       if (value && typeof value.onConfirm === "function") {
-        Promise.resolve(value.onConfirm()).catch((error) => console.error("Aksi konfirmasi gagal", error));
+        Promise.resolve(value.onConfirm()).catch((error) => setConfirmState({ title: "Penyimpanan gagal", body: error.message }));
       }
       setConfirmState(null);
       return;
@@ -734,13 +755,116 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     setConfirmState(value);
   }, [role]);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [ajuanRequests, setAjuanRequests] = useState(initialAjuanRequests);
-  const [outgoingLetters, setOutgoingLetters] = useState(initialOutgoingLetters);
+  const [ajuanRequests, setAjuanRequests] = useState([]);
+  const [outgoingLetters, setOutgoingLetters] = useState([]);
   const [userRows, setUserRows] = useState([]);
   const [auditRows, setAuditRows] = useState(rows["Audit Trail"]);
   const [apiNotice, setApiNotice] = useState("");
   const [finalSyncError, setFinalSyncError] = useState('');
   const [localDataReady, setLocalDataReady] = useState(false);
+  const [databaseReady, setDatabaseReady] = useState(false);
+  const [databaseError, setDatabaseError] = useState("");
+  const [importingLegacy, setImportingLegacy] = useState(false);
+  const databaseEpoch = useRef(0);
+  const databaseWrites = useRef(0);
+  const sessionIdentity = useRef(null);
+  sessionIdentity.current = sessionUser?.id;
+
+  const loadDatabaseRecords = useCallback(async () => {
+    if (!sessionUser?.id || isDummyToken()) return;
+    const epoch = databaseEpoch.current;
+    const userId = sessionUser.id;
+    async function allPages(route) {
+      const items = [];
+      for (let page = 1; ; page++) {
+        const payload = await apiFetch(`/${route}?page=${page}&perPage=100`, { timeoutMs: 20000 });
+        items.push(...payload.data);
+        if (items.length >= payload.meta.totalCount || !payload.data.length) return items;
+      }
+    }
+    const [requests, outgoing] = await Promise.all([
+      allPages("letter-requests"),
+      ["Operator", "Pimpinan", "Administrator"].includes(role) ? allPages("outgoing-letters") : Promise.resolve([])
+    ]);
+    if (epoch !== databaseEpoch.current || databaseWrites.current || sessionIdentity.current !== userId) return;
+    setAjuanRequests(requests.map(item => rememberDatabaseNumber("letter_requests", item)));
+    setOutgoingLetters(outgoing.map(item => rememberDatabaseNumber("outgoing_letters", item)));
+    setDatabaseReady(true);
+    setDatabaseError("");
+  }, [sessionUser?.id, role]);
+
+  useEffect(() => {
+    databaseEpoch.current++;
+    setDatabaseReady(false);
+    setDatabaseError("");
+    setAjuanRequests([]);
+    setOutgoingLetters([]);
+    databaseRecordNumbers.clear();
+    if (!loggedIn || authLoading || !sessionUser?.id) return;
+    if (isDummyToken()) {
+      hydrateAjuanAttachmentPayloads(readLocalJson(LOCAL_AJUAN_KEY, initialAjuanRequests)).then(items => setAjuanRequests(normalizeAjuanWorkflowStatus(items)));
+      hydrateOutgoingAttachmentPayloads(readLocalJson(LOCAL_OUTGOING_KEY, initialOutgoingLetters)).then(items => setOutgoingLetters(normalizeOutgoingWorkflowStatus(items)));
+      return;
+    }
+    let active = true;
+    const refresh = () => {
+      if (databaseWrites.current) return;
+      loadDatabaseRecords().catch(error => { if (active) setDatabaseError(`Data database belum dapat dimuat: ${error.message}`); });
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 15000);
+    window.addEventListener("focus", refresh);
+    return () => { active = false; databaseEpoch.current++; window.clearInterval(interval); window.removeEventListener("focus", refresh); };
+  }, [loggedIn, authLoading, sessionUser?.id, loadDatabaseRecords]);
+
+  async function saveDatabaseRecord(route, entity, record, updates = null) {
+    if (!databaseReady) throw new Error("Tunggu sampai data database berhasil dimuat sebelum menyimpan.");
+    const userId = sessionUser?.id;
+    databaseWrites.current++;
+    databaseEpoch.current++;
+    try {
+      const payload = await apiFetch(`/${route}${updates ? `/${encodeURIComponent(record.nomor)}` : ""}`, {
+        method: updates ? "PATCH" : "POST", timeoutMs: 60000,
+        body: JSON.stringify(compactLetterPayload(updates ? { ...updates, version: updates.version ?? record.version } : record))
+      });
+      if (sessionIdentity.current !== userId) throw new Error("Sesi telah berubah. Masuk kembali untuk melihat hasil penyimpanan.");
+      setDatabaseError("");
+      return rememberDatabaseNumber(entity, payload.data);
+    } catch (error) {
+      setDatabaseError(`Surat belum berhasil disimpan: ${error.message}`);
+      throw error;
+    } finally { databaseWrites.current--; databaseEpoch.current++; }
+  }
+
+  const legacyRequests = !isDummyToken() && sessionUser?.id && ["User", "Pegawai"].includes(role)
+    ? readLocalJson(LOCAL_AJUAN_KEY, []).filter(item => item.ownerId === sessionUser.id && !ajuanRequests.some(saved => saved.legacyReference === item.nomor)) : [];
+  const legacyOutgoing = !isDummyToken() && role === "Operator"
+    ? readLocalJson(LOCAL_OUTGOING_KEY, []).filter(item => !initialOutgoingLetters.some(sample => sample.nomor === item.nomor) && !outgoingLetters.some(saved => saved.legacyReference === item.nomor)) : [];
+  const legacyCount = legacyRequests.length + legacyOutgoing.length;
+  async function importLegacyRecords() {
+    if (importingLegacy) return;
+    setImportingLegacy(true);
+    try {
+      for (const [entity, route, items] of [["letter_requests", "letter-requests", legacyRequests], ["outgoing_letters", "outgoing-letters", legacyOutgoing]]) {
+        for (const old of items) {
+          const [hydrated] = entity === "letter_requests" ? await hydrateAjuanAttachmentPayloads([old]) : await hydrateOutgoingAttachmentPayloads([old]);
+          const documents = [...(hydrated.lampiran || []), ...(hydrated.lampiranApproval || []), ...(hydrated.lampiranFinal || []), hydrated.dokumenApprovalPimpinan, hydrated.suratFinalOperator, hydrated.dokumenPendukungRevisi].filter(item => item?.[3]);
+          const uniqueDocuments = documents.filter((item,index) => documents.findIndex(candidate => candidate[3] === item[3]) === index);
+          const saved = await saveDatabaseRecord(route, entity, {
+            jenis: hydrated.jenis, judul: hydrated.judul || hydrated.perihal, perihal: hydrated.perihal || hydrated.judul,
+            tujuan: hydrated.tujuan, keterangan: hydrated.keterangan || "", ringkasan: hydrated.ringkasan || "",
+            penerima: hydrated.penerima || "", tembusan: hydrated.tembusan || [],
+            clientReference: `legacy:${old.nomor}`, legacyReference: old.nomor, legacyStatus: old.status,
+            status: "Draft", lampiran: uniqueDocuments
+          });
+          if (entity === "letter_requests") setAjuanRequests(current => [saved, ...current.filter(item => item.id !== saved.id)]);
+          else setOutgoingLetters(current => [saved, ...current.filter(item => item.id !== saved.id)]);
+        }
+      }
+    } catch (error) { setDatabaseError(`Impor belum selesai: ${error.message}. Data browser lama tetap tersimpan.`); }
+    finally { setImportingLegacy(false); }
+  }
+
   const [userParams, setUserParams] = useState({ page: 1, search: "", role: "", status: "" });
   const [userMeta, setUserMeta] = useState({ totalPages: 1, totalCount: 0 });
   const userLoadId = useRef(0);
@@ -793,6 +917,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     let cancelled = false;
 
     async function loadLocalData() {
+      if (!isDummyToken()) { setLocalDataReady(true); return; }
       const storedAjuan = readLocalJson(LOCAL_AJUAN_KEY, initialAjuanRequests);
       const storedOutgoing = readLocalJson(LOCAL_OUTGOING_KEY, initialOutgoingLetters);
       const hydratedAjuan = await hydrateAjuanAttachmentPayloads(storedAjuan);
@@ -812,6 +937,7 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
 
   useEffect(() => {
     function syncAjuanFromStorage(event) {
+      if (!isDummyToken()) return;
       try {
         if (event.key === LOCAL_AJUAN_KEY && event.newValue) {
           const storedAjuan = JSON.parse(event.newValue);
@@ -836,12 +962,12 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
   }, []);
 
   useEffect(() => {
-    if (!localDataReady) return;
+    if (!localDataReady || !isDummyToken()) return;
     writeLocalJson(LOCAL_AJUAN_KEY, stripAjuanAttachmentPayloads(normalizeAjuanWorkflowStatus(ajuanRequests)));
   }, [ajuanRequests, localDataReady]);
 
   useEffect(() => {
-    if (!localDataReady) return;
+    if (!localDataReady || !isDummyToken()) return;
     writeLocalJson(LOCAL_OUTGOING_KEY, stripOutgoingAttachmentPayloads(normalizeOutgoingWorkflowStatus(outgoingLetters)));
   }, [outgoingLetters, localDataReady]);
 
@@ -1043,8 +1169,15 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     if (Object.keys(nextErrors).length === 0) setConfirm({ title: "Simpan data?", body: "Data akan disimpan dan aktivitasnya masuk audit trail." });
   }
 
-  function createAjuanRequest(request) {
+  async function createAjuanRequest(request) {
     if (isRemovedAjuanRequest(request)) return;
+    if (!isDummyToken()) {
+      const current = ajuanRequests.find(item => item.nomor === request.nomor);
+      const saved = await saveDatabaseRecord("letter-requests", "letter_requests", current || request, current ? request : null);
+      setAjuanRequests(items => [saved, ...items.filter(item => item.nomor !== saved.nomor)]);
+      return saved;
+    }
+    localRecordNumber("letter_requests", request.nomor);
     request = { ...request, ownerId: sessionUser?.id };
     const requestKey = getAjuanIdentityKey(request);
     setAjuanRequests((current) => [
@@ -1072,8 +1205,15 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     setConfirm({ title: "Ajuan terkirim", body: `${request.nomor} sudah masuk ke portal pimpinan untuk proses approval. Operator dapat memantau aktivitas ajuan.` });
   }
 
-  function updateAjuanRequest(nomor, updates) {
+  async function updateAjuanRequest(nomor, updates) {
     if (isRemovedAjuanRequest({ nomor, ...updates })) return;
+    if (!isDummyToken()) {
+      const current = ajuanRequests.find(item => item.nomor === nomor);
+      if (!current) throw new Error("Ajuan tidak tersedia. Muat ulang data.");
+      const saved = await saveDatabaseRecord("letter-requests", "letter_requests", current, updates);
+      setAjuanRequests(items => items.map(item => item.nomor === nomor ? saved : item));
+      return saved;
+    }
     setAjuanRequests((current) => {
       const exists = current.some((item) => item.nomor === nomor);
       if (exists) {
@@ -1094,7 +1234,13 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     }
   }
 
-  function createOutgoingLetter(letter) {
+  async function createOutgoingLetter(letter) {
+    if (!isDummyToken()) {
+      const saved = await saveDatabaseRecord("outgoing-letters", "outgoing_letters", letter);
+      setOutgoingLetters(items => [saved, ...items.filter(item => item.id !== saved.id)]);
+      return saved;
+    }
+    localRecordNumber("outgoing_letters", letter.nomor);
     setOutgoingLetters((current) => {
       const nextLetters = current.filter((item) => item.nomor !== letter.nomor);
       return [letter, ...nextLetters];
@@ -1105,7 +1251,14 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
     });
   }
 
-  function updateOutgoingLetter(nomor, updates) {
+  async function updateOutgoingLetter(nomor, updates) {
+    if (!isDummyToken()) {
+      const current = outgoingLetters.find(item => item.nomor === nomor);
+      if (!current) throw new Error("Surat keluar tidak tersedia. Muat ulang data.");
+      const saved = await saveDatabaseRecord("outgoing-letters", "outgoing_letters", current, updates);
+      setOutgoingLetters(items => items.map(item => item.nomor === nomor ? saved : item));
+      return saved;
+    }
     setOutgoingLetters((current) => current.map((letter) => (
       letter.nomor === nomor
         ? {
@@ -1404,6 +1557,9 @@ export default function Home({ initialRole = "User", startLoggedIn = false }) {
           </div>
         </header>
         <section className="content">
+          {databaseReady && legacyCount > 0 && <div className="revisionNotice" role="status"><span>{legacyCount} data surat lama tersedia di browser ini. Impor akan menyimpannya sebagai Draft di database untuk diperiksa dan diajukan kembali. Dokumen yang masih tersedia ikut disimpan; data browser lama tetap tersimpan.</span><button type="button" className="softBtn" disabled={importingLegacy} onClick={importLegacyRecords}>{importingLegacy ? "Mengimpor..." : "Impor sebagai Draft"}</button></div>}
+          {databaseError && <p className="fieldError" role="alert">{databaseError} <button type="button" onClick={() => loadDatabaseRecords().catch(error => setDatabaseError(error.message))}>Muat ulang</button></p>}
+          {!isDummyToken() && !databaseReady && !databaseError && <p role="status">Memuat data persuratan dari database...</p>}
           {role === 'Operator' && finalSyncError && <p className="fieldError" role="alert">{finalSyncError}</p>}
           {currentView === "Notifikasi" && <NotificationPage />}
           {currentView === "Dashboard" && (role === "Operator" ? <OperatorDashboard setView={setView} ajuanRequests={ajuanRequests} outgoingLetters={outgoingLetters} /> : role === "Pimpinan" ? <PimpinanDashboard setView={setView} ajuanRequests={ajuanRequests} /> : role === "Administrator" ? <AdminDashboard setView={setView} userRows={userRows} auditRows={auditRows} apiNotice={apiNotice} /> : <Dashboard key={sessionUser?.id} role={role} setView={setView} requests={userRequests} />)}
@@ -1518,18 +1674,24 @@ function Dashboard({ role, setView, requests }) {
       <section className="dashboardGrid">
         <article className="dashPanel requestsPanel">
           <PanelHeader title="Ajuan Surat Terbaru" action="Lihat semua" onClick={() => setView("Ajuan Surat")} />
-          <table className="dashboardTable">
-            <thead><tr><th>Nomor Ajuan</th><th>Jenis Surat</th><th>Tanggal</th><th>Status</th><th>Aksi</th></tr></thead>
+          <div className="tableScroll" role="region" aria-label="Ajuan Surat Terbaru" tabIndex={0}>
+          <table className="dashboardTable recentRequestsTable">
+            <colgroup>
+              <col className="recordNumberColumn" /><col className="referenceColumn" />
+              <col /><col className="dateColumn" /><col className="statusColumn" /><col className="actionColumn" />
+            </colgroup>
+            <thead><tr><th>Nomor</th><th>Nomor Ajuan</th><th>Jenis Surat</th><th>Tanggal</th><th>Status</th><th>Aksi</th></tr></thead>
             <tbody>
               {visibleRequests.slice(0, 5).map((item) => (
                 <tr key={item.nomor}>
-                  <td>{item.nomor}</td><td>{item.jenis}</td><td>{item.tanggal}</td><td><Status text={getAjuanDisplayStatus(item)} /></td>
+                  <td>{localRecordNumber("letter_requests", item.nomor)}</td><td>{item.nomor}</td><td>{item.jenis}</td><td>{item.tanggal}</td><td><Status text={getAjuanDisplayStatus(item)} /></td>
                   <td><button className="viewBtn" aria-label={`Lihat ajuan ${item.nomor}`} onClick={() => setView("Ajuan Surat")}><LineIcon name="eye" /></button></td>
                 </tr>
               ))}
-              {visibleRequests.length === 0 && <tr><td colSpan={5}>Belum ada ajuan surat. Ajuan yang Anda buat akan muncul di sini.</td></tr>}
+              {visibleRequests.length === 0 && <tr><td colSpan={6}>Belum ada ajuan surat. Ajuan yang Anda buat akan muncul di sini.</td></tr>}
             </tbody>
           </table>
+          </div>
         </article>
         <article className="dashPanel summaryPanel">
           <h3>Ringkasan Status Ajuan</h3>
@@ -1825,7 +1987,7 @@ function AdminDashboard({ setView, userRows, apiNotice }) {
         <article className="dashPanel">
           <PanelHeader title="Pengguna Aktif" action="Kelola" onClick={() => setView("Pengguna")} />
           <table className="dashboardTable adminUserTable">
-            <thead><tr><th>ID</th><th>Nama</th><th>Role</th><th>Unit Kerja</th><th>Status</th><th>Aksi</th></tr></thead>
+            <thead><tr><th>Nomor</th><th>Nama</th><th>Role</th><th>Unit Kerja</th><th>Status</th><th>Aksi</th></tr></thead>
             <tbody>
               {recentUsers.map(([id, name, roleName, unit, status]) => (
                 <tr key={id}>
@@ -1946,11 +2108,11 @@ function OperatorAjuanMasuk({ setConfirm, ajuanRequests, onUpdateAjuan }) {
         {filteredRows.length > 0 ? (
           <>
             <table className="dashboardTable ajuanHistoryTable operatorAjuanTable">
-              <thead><tr><th>No</th><th>Nama Pemohon</th><th>Jenis Surat</th><th>Unit/Bagian</th><th>Tanggal</th><th>Status</th><th>Aksi</th></tr></thead>
+              <thead><tr><th>Nomor</th><th>Nama Pemohon</th><th>Jenis Surat</th><th>Unit/Bagian</th><th>Tanggal</th><th>Status</th><th>Aksi</th></tr></thead>
               <tbody>
                 {visibleRows.map((row, index) => (
                   <tr key={row[0]}>
-                    <td>{(ajuanPage - 1) * ajuanPerPage + index + 1}</td><td>{row[2]}</td><td>{row[1]}</td><td>{row[3]}</td><td>{row[4]}</td><td><Status text={row[5]} /></td>
+                    <td>{localRecordNumber("letter_requests", row[0])}</td><td>{row[2]}</td><td>{row[1]}</td><td>{row[3]}</td><td>{row[4]}</td><td><Status text={row[5]} /></td>
                     <td>
                       <div className="operatorActions">
                         <button className="viewBtn edit" onClick={() => setSelectedAjuan(row)} aria-label={`Buka detail ${row[0]}`}><LineIcon name="edit" /></button>
@@ -2038,6 +2200,7 @@ function AjuanMasukDetail({ ajuan, detail, onBack, setConfirm, onUpdateAjuan }) 
           <article className="requestCard">
             <h2><span className="titleIconBox"><LineIcon name="clipboard" /></span> Detail Pengajuan</h2>
             <div className="requestRows requestSubmissionGrid">
+              <DetailItem icon="info" label="Nomor" value={localRecordNumber("letter_requests", nomor)} />
               <DetailItem icon="info" label="Nomor Ajuan" value={nomor} />
               <DetailItem icon="doc" label="Nomor Surat" value={getAjuanNomorSurat(displayedRequestDetail)} />
               <DetailItem icon="info" label="Jenis Surat" value={jenis} />
@@ -2230,7 +2393,7 @@ function OperatorFinalNumberPanel({ nomor, detail, setConfirm, onSubmitFinal, on
           setErrors({ api: error.message });
           return;
         }
-        onSubmitFinal?.(nomor, {
+        await onSubmitFinal?.(nomor, {
           ...detail,
           status: "Selesai",
           nomorSuratFinal: trimmedNumber,
@@ -2315,9 +2478,8 @@ function RevisionRequestPanel({ nomor, pemohon, setConfirm, onCancel, onLock, on
     setConfirm({
       title: "Kirim permintaan revisi?",
       body: `${nomor} akan dikembalikan ke ${pemohon} dengan kategori "${finalCategory}" dan catatan revisi: ${trimmedNote}`,
-      onConfirm: () => {
-        onLock?.();
-        onSubmitRevision?.(nomor, {
+      onConfirm: async () => {
+        await onSubmitRevision?.(nomor, {
           status: "Perlu Revisi",
           kategoriRevisi: finalCategory,
           catatanOperator: trimmedNote,
@@ -2405,9 +2567,8 @@ function RejectRequestPanel({ nomor, pemohon, setConfirm, onCancel, onLock, onSu
     setConfirm({
       title: "Tolak pengajuan?",
       body: `${nomor} akan ditolak dan dikembalikan ke ${pemohon} dengan catatan: ${trimmedNote}`,
-      onConfirm: () => {
-        onLock?.();
-        onSubmitReject?.(nomor, {
+      onConfirm: async () => {
+        await onSubmitReject?.(nomor, {
           status: "Ditolak",
           catatanOperator: trimmedNote,
           kategoriRevisi: "Ditolak operator",
@@ -2477,9 +2638,8 @@ function VerificationProcessPanel({ nomor, pemohon, setConfirm, onCancel, onSubm
       body: inspectionResult === "valid"
         ? `${nomor} akan diteruskan ke portal pimpinan untuk approval.`
         : `${nomor} tetap di portal operator dengan hasil: ${resultLabels[inspectionResult]}.`,
-      onConfirm: () => {
-        onLock?.();
-        onSubmitInspection?.(nomor, {
+      onConfirm: async () => {
+        await onSubmitInspection?.(nomor, {
           status: nextStatus,
           hasilPemeriksaan: resultLabels[inspectionResult],
           diteruskanKe: inspectionResult === "valid" ? "Dewi Pimpinan" : "",
@@ -3702,6 +3862,7 @@ function IncomingLetterForm({ role, setConfirm, onLocalDispositionCreated }) {
               <table>
                 <thead>
                   <tr>
+                    <th>Nomor</th>
                     <th>Asal Surat</th>
                     <th>Perihal</th>
                     <th>Tanggal Masuk</th>
@@ -3715,6 +3876,7 @@ function IncomingLetterForm({ role, setConfirm, onLocalDispositionCreated }) {
                     const [agenda, sender, subject, date, target, status] = row;
                     return (
                     <tr key={agenda}>
+                      <td>{row.number || row.detail?.number || "-"}</td>
                       <td>{sender}</td>
                       <td>{subject}</td>
                       <td>{date}</td>
@@ -4002,7 +4164,9 @@ function mapIncomingLetterToPimpinanRow(item) {
         document.download_path || ""
       ]]
     : [["Dokumen_Surat_Masuk.pdf", "512 KB", "Diunggah operator", "", "application/pdf"]];
+  row.number = item.number || "-";
   row.detail = {
+    number: item.number || "-",
     id,
     agenda,
     nomorSurat: letterNumber,
@@ -4102,7 +4266,9 @@ function mapDispositionToUserRow(item) {
     formatDateOnly(item.due_date || item.dueDate),
     dispositionStatusLabel(item.status)
   ];
+  row.number = item.number || "-";
   row.detail = {
+    number: item.number || "-",
     backendId: item.id || item.backendId || "",
     agenda: item.agenda_number || item.agenda || "",
     nomorSurat: item.letter_number || item.nomorSurat || "",
@@ -4128,7 +4294,9 @@ function mapDispositionToPimpinanRow(item) {
     item.subject || item.perihal || item.instruction || item.instruksi || "Instruksi disposisi",
     dispositionStatusLabel(item.status)
   ];
+  row.number = item.number || "-";
   row.detail = {
+    number: item.number || "-",
     backendId: item.id || item.backendId || "",
     agenda: item.agenda_number || item.agenda || "",
     nomorSurat: item.letter_number || item.nomorSurat || row[1],
@@ -4164,7 +4332,9 @@ function mapIncomingLetterToOperatorRow(item) {
   const row = [agenda, sender, subject, receivedDate, target, status];
   const document = item.document;
   const documentName = document?.original_name || document?.name || "";
+  row.number = item.number || "-";
   row.detail = {
+    number: item.number || "-",
     incomingId: id,
     letterNumber: item.letter_number || item.letterNumber || "",
     tanggalMasuk: receivedDate,
@@ -4461,6 +4631,7 @@ function PimpinanIncomingDetail({ detail, onBack }) {
               <span className={detail.sifat === "Segera" ? "priority high" : "priority"}>{detail.sifat}</span>
             </div>
             <div className="dispositionSourceRows">
+              <DetailItem icon="info" label="Nomor" value={detail.number || "-"} />
               <DetailItem icon="calendar" label="Nomor Agenda" value={detail.agenda} />
               <DetailItem icon="doc" label="Nomor Surat" value={detail.nomorSurat} />
               <DetailItem icon="user" label="Pengirim" value={detail.pengirim} />
@@ -4807,6 +4978,8 @@ function ArchiveHome({ ajuanRequests = [], outgoingLetters = [] }) {
   const [archivePageSize, setArchivePageSize] = useState(10);
   const [previewDocument, setPreviewDocument] = useState(null);
   const [incomingLetters, setIncomingLetters] = useState([]);
+  const [databaseArchives, setDatabaseArchives] = useState([]);
+  const [archiveError, setArchiveError] = useState("");
   const baseArchiveRows = [
     ["AJ/2025/05/00128", "Ajuan Surat", "Surat Izin Penelitian", "16 Mei 2025", "Otomatis", "Disetujui"],
     ["SM/109/V/2026", "Surat Masuk", "Permintaan data layanan", "15 Mei 2025", "Otomatis", "Selesai"],
@@ -4818,12 +4991,14 @@ function ArchiveHome({ ajuanRequests = [], outgoingLetters = [] }) {
   const incomingArchiveRows = getIncomingLetterArchiveRows(incomingLetters);
   const outgoingArchiveRows = getOutgoingLetterArchiveRows(outgoingLetters);
   const existingArchiveNumbers = new Set(baseArchiveRows.map((row) => row[0]));
-  const archiveRows = [
+  const demoArchiveRows = [
     ...[...completedAjuanArchiveRows, ...incomingArchiveRows, ...outgoingArchiveRows]
       .filter((row, index, rows) => rows.findIndex((candidate) => candidate[0] === row[0]) === index)
       .filter((row) => !existingArchiveNumbers.has(row[0])),
     ...baseArchiveRows
   ];
+  const archiveRows = isDummyToken() ? demoArchiveRows : databaseArchives;
+  [...archiveRows].reverse().forEach((row) => localRecordNumber("archives", `${row[1]}:${row[0]}`));
   const archiveSummary = [
     ["Total Arsip", String(archiveRows.length), "Semua dokumen otomatis", "folder", "blue"],
     ["Ajuan Surat", String(archiveRows.filter((row) => row[1] === "Ajuan Surat").length), "Otomatis setelah penomoran", "check", "green"],
@@ -4865,6 +5040,26 @@ function ArchiveHome({ ajuanRequests = [], outgoingLetters = [] }) {
     let active = true;
 
     async function loadIncomingArchiveData() {
+      if (getStoredToken() && !isDummyToken()) {
+        try {
+          const items = [];
+          for (let page = 1; ; page++) {
+            const payload = await apiFetch(`/archives?page=${page}&perPage=100`, { timeoutMs: 20000 });
+            items.push(...payload.data);
+            if (items.length >= payload.meta.totalCount || !payload.data.length) break;
+          }
+          if (!active) return;
+          setDatabaseArchives(items.map(item => {
+            const source = { letter_request: "Ajuan Surat", incoming_letter: "Surat Masuk", outgoing_letter: "Surat Keluar" }[item.sourceType];
+            databaseRecordNumbers.set(`archives:${source}:${item.letterNumber}`, item.number);
+            const detail = { ...item.detail };
+            if (item.attachment) { detail.suratFinalOperator = item.attachment; detail.lampiranFinal = [item.attachment]; }
+            return [item.letterNumber, source, item.subject, formatArchiveDate(item.archivedAt), "Otomatis", item.status, detail];
+          }));
+          setArchiveError("");
+        } catch (error) { if (active) setArchiveError(error.message); }
+        return;
+      }
       const localItems = await hydrateIncomingDocumentPayloads(getActiveIncomingLetters(readLocalJson(LOCAL_INCOMING_KEY, [])));
       if (!getStoredToken() || isDummyToken()) {
         if (active) setIncomingLetters(localItems);
@@ -4885,13 +5080,14 @@ function ArchiveHome({ ajuanRequests = [], outgoingLetters = [] }) {
     }
 
     loadIncomingArchiveData();
-    return () => {
-      active = false;
-    };
-  }, []);
+    const interval = window.setInterval(loadIncomingArchiveData, 15000);
+    window.addEventListener("focus", loadIncomingArchiveData);
+    return () => { active = false; window.clearInterval(interval); window.removeEventListener("focus", loadIncomingArchiveData); };
+  }, [ajuanRequests, outgoingLetters]);
 
   return (
     <section className="archivePage">
+      {archiveError && <p className="fieldError" role="alert">Arsip database belum dapat dimuat: {archiveError}</p>}
       <header className="ajuanHeader">
         <div>
           <h1>Arsip Digital</h1>
@@ -4936,10 +5132,12 @@ function ArchiveHome({ ajuanRequests = [], outgoingLetters = [] }) {
           <LineIcon name="info" />
           <span>Ajuan Surat, Surat Masuk, dan Surat Keluar otomatis masuk arsip setelah operator menyimpan <strong>nomor surat</strong>.</span>
         </div>
-        <table id="archive-results" className="dashboardTable ajuanHistoryTable archiveTable">
-          <thead><tr><th>Nomor Surat</th><th>Sumber</th><th>Perihal</th><th>Tanggal Arsip</th><th>Status</th><th>Aksi</th></tr></thead>
+        <div className="tableScroll" role="region" aria-label="Daftar arsip" tabIndex={0}>
+        <table id="archive-results" className="dashboardTable ajuanHistoryTable archiveTable numberedRecordsTable">
+          <colgroup><col className="recordNumberColumn" /><col className="referenceColumn" /><col className="sourceColumn" /><col /><col className="dateColumn" /><col className="statusColumn" /><col className="actionColumn" /></colgroup>
+          <thead><tr><th>Nomor</th><th>Nomor Surat</th><th>Sumber</th><th>Perihal</th><th>Tanggal Arsip</th><th>Status</th><th>Aksi</th></tr></thead>
           <tbody>
-            {visibleArchiveRows.length === 0 && <tr><td colSpan={6}>Tidak ada surat yang sesuai dengan pencarian atau filter. Ubah kata kunci atau pilih Semua arsip.</td></tr>}
+            {visibleArchiveRows.length === 0 && <tr><td colSpan={7}>Tidak ada surat yang sesuai dengan pencarian atau filter. Ubah kata kunci atau pilih Semua arsip.</td></tr>}
             {visibleArchiveRows.map((row) => {
               const [number, source, subject, date, , status] = row;
               const attachment = getArchiveRowAttachment(row);
@@ -4957,12 +5155,13 @@ function ArchiveHome({ ajuanRequests = [], outgoingLetters = [] }) {
               };
               return (
               <tr key={number}>
-                <td>{number}</td><td>{source}</td><td>{subject}</td><td>{date}</td><td><Status text={status} /></td>
+                <td>{localRecordNumber("archives", `${source}:${number}`)}</td><td>{number}</td><td>{source}</td><td>{subject}</td><td>{date}</td><td><Status text={status} /></td>
                 <td><DocumentOpenButtons spec={spec} onPreview={setPreviewDocument} compact /></td>
               </tr>
             );})}
           </tbody>
         </table>
+        </div>
         <div className="archivePagination" aria-label="Navigasi halaman arsip">
           <label className="archivePageSize">
             Tampilkan
@@ -5186,6 +5385,7 @@ function AjuanSuratHome({ setConfirm, onCreateAjuan, currentUserName, currentUse
     setCreateOpen(true);
   };
   const createRetryDraft = (ajuan) => ({
+    version: ajuan.version,
     nomor: ajuan.nomor,
     nomorSuratFinal: ajuan.nomorSuratFinal,
     jenis: ajuan.jenis,
@@ -5311,7 +5511,7 @@ function AjuanSuratHome({ setConfirm, onCreateAjuan, currentUserName, currentUse
           )}
         </div>
         <table className="dashboardTable ajuanHistoryTable">
-          <thead><tr><th>No.</th><th>Nomor Surat</th><th>Jenis Surat</th><th>Perihal</th><th>Tanggal Ajuan</th><th>Status</th><th>Aksi</th></tr></thead>
+          <thead><tr><th>Nomor</th><th>Nomor Surat</th><th>Jenis Surat</th><th>Perihal</th><th>Tanggal Ajuan</th><th>Status</th><th>Aksi</th></tr></thead>
           <tbody>
             {visibleHistory.map((row) => {
               const detail = row[6] || historyRowToAjuan(row, currentUserName, currentUserProfile);
@@ -5326,7 +5526,7 @@ function AjuanSuratHome({ setConfirm, onCreateAjuan, currentUserName, currentUse
               const nomorSurat = getAjuanNomorSurat(detail);
               return (
                 <tr key={row[0]} className="clickableHistoryRow" onClick={openDetail}>
-                  <td>{row[0]}</td>
+                  <td>{localRecordNumber("letter_requests", detail.nomor || row[1])}</td>
                   <td>
                     <button
                       type="button"
@@ -5432,6 +5632,7 @@ function hasUploadedAjuanDocument(ajuan) {
 function getAjuanWorkflowStatus(ajuanOrStatus) {
   if (!ajuanOrStatus || typeof ajuanOrStatus === "string") return ajuanOrStatus || "Draft";
   const status = ajuanOrStatus.status || "Draft";
+  if (ajuanOrStatus.id && ajuanOrStatus.version) return status;
   if (status !== "Draft" && !hasUploadedAjuanDocument(ajuanOrStatus)) return "Draft";
   if (status === "Disetujui" && getAjuanNomorSurat(ajuanOrStatus) !== "-") return "Selesai";
   return status;
@@ -5510,7 +5711,9 @@ function AjuanSuratDetail({ ajuan, onBack, onContinue, onCreateRetry, setConfirm
               <span className="priority">{ajuan.nomor}</span>
             </div>
             <div className="detailGrid">
+              <DetailItem icon="info" label="Nomor" value={localRecordNumber("letter_requests", ajuan.nomor)} />
               <DetailItem icon="doc" label="Nomor Ajuan" value={ajuan.nomor} />
+              {ajuan.legacyReference && <DetailItem icon="info" label="Referensi sebelum impor" value={ajuan.legacyReference} />}
               <DetailItem icon="doc" label="Nomor Surat" value={getAjuanNomorSurat(ajuan)} />
               <DetailItem icon="info" label="Jenis Surat" value={ajuan.jenis} />
               <DetailItem icon="calendar" label="Tanggal Ajuan" value={ajuan.tanggal} />
@@ -5635,6 +5838,9 @@ function AjuanSuratDetail({ ajuan, onBack, onContinue, onCreateRetry, setConfirm
 }
 
 function AjuanSuratCreate({ onCancel, setConfirm, onCreateAjuan, currentUserName, currentUserProfile, draft }) {
+  const [submitError, setSubmitError] = useState("");
+  const submissionId = useRef(null);
+  const submitting = useRef(false);
   const isRevisionMode = Boolean(draft?.revisionMode);
   const savedJenis = draft?.jenis || "";
   const savedOtherJenis = savedJenis.startsWith("Surat Lainnya - ")
@@ -5665,7 +5871,7 @@ function AjuanSuratCreate({ onCancel, setConfirm, onCreateAjuan, currentUserName
     const submitter = event.nativeEvent.submitter;
     const form = new FormData(event.currentTarget);
     const intent = submitter?.value || "send";
-    const nomor = String(form.get("nomor") || "").trim() || generateAjuanNumber();
+    const nomor = String(form.get("nomor") || draft?.nomor || "").trim() || generateAjuanNumber();
     const selectedJenisValue = String(form.get("jenis") || "").trim();
     const jenisLainnya = String(form.get("jenisLainnya") || "").trim();
     const jenis = selectedJenisValue === "Surat Lainnya"
@@ -5704,7 +5910,13 @@ function AjuanSuratCreate({ onCancel, setConfirm, onCreateAjuan, currentUserName
         ? draft.lampiran
         : [["Dokumen pendukung belum diunggah", "-", `Ajuan dikirim ${today}`]];
 
-    onCreateAjuan({
+    if (submitting.current) return;
+    submitting.current = true;
+    submissionId.current ||= globalThis.crypto?.randomUUID?.() || `submission-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    try {
+    await onCreateAjuan({
+      clientReference: submissionId.current,
+      version: draft?.version,
       nomor,
       jenis,
       pemohon: currentUserName || "Budi Santoso",
@@ -5733,10 +5945,12 @@ function AjuanSuratCreate({ onCancel, setConfirm, onCreateAjuan, currentUserName
       lampiran
     });
     onCancel();
+    } catch (error) { setSubmitError(error.message); } finally { submitting.current = false; }
   }
 
   return (
     <section className="ajuanCreatePage">
+      {submitError && <p className="fieldError" role="alert">{submitError}</p>}
       <header className="dispositionCreateHeader">
         <div>
           <h1>{isRevisionMode ? "Revisi Ajuan Surat" : "Buat Ajuan Surat"}</h1>
@@ -6644,12 +6858,12 @@ function AdminUserManagement({
         <div className="adminUsersTableWrap">
           <table className="adminUsersTable">
             <thead>
-              <tr><th>No</th><th>Nama</th><th>Role</th><th>Unit Kerja</th><th>Status</th><th>Aksi</th></tr>
+              <tr><th>Nomor</th><th>Nama</th><th>Role</th><th>Unit Kerja</th><th>Status</th><th>Aksi</th></tr>
             </thead>
             <tbody>
               {visibleRows.map((row, index) => (
                 <tr key={row[0]}>
-                  <td>{start + index}</td>
+                  <td>{row[6]?.number || row[0]}</td>
                   <td><strong>{row[1]}</strong></td>
                   <td><span className={`adminUsersBadge role ${roleTone(row[2])}`}>{row[2]}</span></td>
                   <td>{row[3] || "-"}</td>
@@ -7153,8 +7367,8 @@ function ModuleView({
       <OutgoingLetterForm
         onCancel={() => setOpenForms((current) => ({ ...current, [view]: false }))}
         setConfirm={setConfirm}
-        onCreateOutgoing={(letter) => {
-          onCreateOutgoing(letter);
+        onCreateOutgoing={async (letter) => {
+          await onCreateOutgoing(letter);
           setOpenForms((current) => ({ ...current, [view]: false }));
         }}
       />
@@ -7426,12 +7640,13 @@ function DispositionDashboard({ rows, query, setQuery, onDetail, onProcess, setC
             <table className="dispositionDashboardTable">
               <thead>
                 <tr>
-                  {["Nomor Surat", "Asal Surat", "Tujuan Disposisi", "Perihal", "Tanggal", "Status", "Aksi"].map((head) => <th key={head}>{head}</th>)}
+                  {["Nomor", "Nomor Surat", "Asal Surat", "Tujuan Disposisi", "Perihal", "Tanggal", "Status", "Aksi"].map((head) => <th key={head}>{head}</th>)}
                 </tr>
               </thead>
               <tbody>
                 {visibleRows.map((item) => (
                   <tr key={item.row[0]}>
+                    <td>{item.row.number || item.row.detail?.number || "-"}</td>
                     <td>{item.nomor}</td>
                     <td>{item.asal}</td>
                     <td>{item.tujuan}</td>
@@ -7587,7 +7802,7 @@ function OperatorOutgoingList({ query, setQuery, outgoingLetters, onCreate, onDe
           <table className="dashboardTable ajuanHistoryTable operatorOutgoingTable">
             <thead>
               <tr>
-                {["No", "Nomor Surat", "Jenis Surat", "Perihal", "Tanggal", "Status", "Aksi"].map((head) => <th key={head}>{head}</th>)}
+                {["Nomor", "Nomor Surat", "Jenis Surat", "Perihal", "Tanggal", "Status", "Aksi"].map((head) => <th key={head}>{head}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -7595,7 +7810,7 @@ function OperatorOutgoingList({ query, setQuery, outgoingLetters, onCreate, onDe
                 const row = outgoingLetterToRow(letter);
                 return (
                   <tr key={letter.nomor}>
-                    <td>{(page - 1) * pageSize + index + 1}</td>
+                    <td>{localRecordNumber("outgoing_letters", letter.nomor)}</td>
                     <td>
                       <button type="button" className="outgoingNumberLink" onClick={() => onDetail(row)}>
                         {letter.nomorFinal || letter.nomor}
@@ -8046,6 +8261,7 @@ function PimpinanDispositionDetail({ detail, onBack }) {
             <div className="dispositionSourceRows">
               <DetailItem icon="info" label="ID Disposisi" value={detail.id} />
               <DetailItem icon="doc" label="Nomor Surat" value={detail.nomorSurat} />
+              <DetailItem icon="info" label="Nomor" value={detail.number || "-"} />
               <DetailItem icon="calendar" label="Nomor Agenda" value={detail.agenda} />
               <DetailItem icon="user" label="Pengirim" value={detail.pengirim} />
               <DetailItem icon="mail" label="Perihal" value={detail.perihal} />
@@ -8217,15 +8433,16 @@ function DataTable({
   return (
     <>
       <div className="tableScroll">
-        <table className={view === "Surat Masuk Pimpinan" ? "approvalTable pimpinanIncomingReviewTable" : "approvalTable"}>
-          <thead><tr>{heads.map((head) => <th key={head}>{head}</th>)}<th>Aksi</th></tr></thead>
+        <table className={`approvalTable${view === "Surat Masuk Pimpinan" ? " pimpinanIncomingReviewTable" : ""}${view !== "Pengguna" && view !== "Audit Trail" ? " numberedRecordsTable" : ""}`}>
+          <thead><tr>{view !== "Pengguna" && view !== "Audit Trail" && <th>Nomor</th>}{heads.map((head, index) => <th key={head} className={index === heads.length - 1 && view !== "Audit Trail" ? "recordStatusCell" : undefined}>{head}</th>)}<th className="recordActionCell">Aksi</th></tr></thead>
           <tbody>
             {displayedData.map((row) => {
               const displayCells = row.slice(0, heads.length);
               return (
                 <tr key={row[0]}>
+                  {view !== "Pengguna" && view !== "Audit Trail" && <td>{row.number || row.detail?.number || (view.includes("Ajuan") || view === "Konsep Surat" ? localRecordNumber("letter_requests", row[0]) : "-")}</td>}
                   {displayCells.map((cell, index) => (
-                    <td key={`${row[0]}-${index}`}>
+                    <td key={`${row[0]}-${index}`} className={index === heads.length - 1 && view !== "Audit Trail" ? "recordStatusCell" : undefined}>
                       {index === heads.length - 1 && view !== "Audit Trail" ? (
                         <Status text={cell} />
                       ) : (
@@ -8233,7 +8450,7 @@ function DataTable({
                       )}
                     </td>
                   ))}
-                  <td>
+                  <td className="recordActionCell">
                     {view === "Pengguna" ? (
                       <div className="actions userActions">
                         <button
@@ -8342,6 +8559,8 @@ function FormPanel({ view, errors, onSubmit, onCancel }) {
 }
 
 function OutgoingLetterForm({ onCancel, setConfirm, onCreateOutgoing }) {
+  const submissionId = useRef(null);
+  const submitting = useRef(false);
   const [summaryLength, setSummaryLength] = useState(0);
   const [formErrors, setFormErrors] = useState({});
   const [savingIntent, setSavingIntent] = useState("");
@@ -8381,6 +8600,9 @@ function OutgoingLetterForm({ onCancel, setConfirm, onCreateOutgoing }) {
       return;
     }
 
+    if (submitting.current) return;
+    submitting.current = true;
+    submissionId.current ||= globalThis.crypto?.randomUUID?.() || `submission-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setSavingIntent(intent);
     try {
       let attachment = null;
@@ -8390,8 +8612,9 @@ function OutgoingLetterForm({ onCancel, setConfirm, onCreateOutgoing }) {
         await saveAttachmentPayload(storageKey, dataUrl);
         attachment = [file.name, formatFileSize(file.size), `Diunggah ${formatJakartaInputDate(payload.tanggalInput)}`, dataUrl, file.type, storageKey];
       }
-      onCreateOutgoing({
+      await onCreateOutgoing({
         ...payload,
+        clientReference: submissionId.current,
         tanggal: formatJakartaInputDate(payload.tanggalInput),
         status: "Menunggu Approval",
         penandatangan: "Dewi Pimpinan",
@@ -8403,6 +8626,7 @@ function OutgoingLetterForm({ onCancel, setConfirm, onCreateOutgoing }) {
       form.dispatchEvent(new Event("reset", { bubbles: true }));
       setSummaryLength(0);
     } finally {
+      submitting.current = false;
       setSavingIntent("");
     }
   }
@@ -8717,8 +8941,9 @@ function ApprovalLetterProcess({ detail, onBack, setConfirm, onUpdateOutgoing })
       body: rejected
         ? `${detail.nomor} akan dikembalikan ke operator dengan catatan: ${note}`
         : `${detail.nomor} akan berubah menjadi Disetujui dan surat approval ${approvalFile.name} tersimpan untuk diproses operator.`,
-      onConfirm: () => {
-        onUpdateOutgoing?.(detail.nomor, {
+      onConfirm: async () => {
+        await onUpdateOutgoing?.(detail.nomor, {
+          version: detail.version,
           status: nextStatus,
           catatanPimpinan: note,
           dokumenApprovalPimpinan: approvedAttachment,
@@ -8909,8 +9134,9 @@ function OutgoingLetterProcess({ detail, onBack, setConfirm, onUpdateOutgoing })
     setConfirm({
       title: "Kirim ulang ke approval?",
       body: `${detail.nomor} akan diperbarui dengan dokumen revisi dan dikirim kembali ke pimpinan.`,
-      onConfirm: () => {
-        onUpdateOutgoing?.(detail.nomor, {
+      onConfirm: async () => {
+        await onUpdateOutgoing?.(detail.nomor, {
+          version: detail.version,
           status: "Menunggu Approval",
           catatanOperator: processNote.trim(),
           dokumenPendukungRevisi: attachment,
@@ -8938,8 +9164,9 @@ function OutgoingLetterProcess({ detail, onBack, setConfirm, onUpdateOutgoing })
     setConfirm({
       title: "Simpan perubahan proses?",
       body: `Catatan proses ${detail.nomor} akan disimpan untuk riwayat operator.`,
-      onConfirm: () => {
-        onUpdateOutgoing?.(detail.nomor, {
+      onConfirm: async () => {
+        await onUpdateOutgoing?.(detail.nomor, {
+          version: detail.version,
           catatanOperator: processNote.trim(),
           riwayat: processNote.trim() ? [[processTime(), `Operator menyimpan catatan proses: ${processNote.trim()}`]] : []
         });
@@ -8976,7 +9203,8 @@ function OutgoingLetterProcess({ detail, onBack, setConfirm, onUpdateOutgoing })
           setProcessError(error.message);
           return;
         }
-        onUpdateOutgoing?.(detail.nomor, {
+        await onUpdateOutgoing?.(detail.nomor, {
+          version: detail.version,
           status: "Dikirim",
           nomorFinal: trimmedNumber,
           kodeUnik: trimmedCode,
@@ -9002,8 +9230,9 @@ function OutgoingLetterProcess({ detail, onBack, setConfirm, onUpdateOutgoing })
     setConfirm({
       title: "Ajukan approval?",
       body: `${detail.nomor} akan dikirim ke pimpinan untuk approval.`,
-      onConfirm: () => {
-        onUpdateOutgoing?.(detail.nomor, {
+      onConfirm: async () => {
+        await onUpdateOutgoing?.(detail.nomor, {
+          version: detail.version,
           status: "Menunggu Approval",
           catatanOperator: processNote.trim(),
           riwayat: [[processTime(), "Operator mengajukan surat keluar ke pimpinan untuk approval"]]
@@ -9384,6 +9613,7 @@ function getPimpinanApprovalAjuanRequests(ajuanRequests) {
   const forwardedRequests = ajuanRequests
     .filter((item) => isAjuanReadyForPimpinanApproval(item) || ["Disetujui", "Ditolak"].includes(item.status))
     .map((item) => {
+      if (item.id) return item;
       const applicantProfile = profileDirectory[item.pemohon] || {};
       return {
         ...item,
@@ -9394,6 +9624,8 @@ function getPimpinanApprovalAjuanRequests(ajuanRequests) {
         diteruskanKe: item.diteruskanKe || "Dewi Pimpinan"
       };
     });
+
+  if (!isDummyToken()) return forwardedRequests;
 
   const demoRequests = rows["Ajuan Surat"]
     .filter((row) => row[4] === "Menunggu Approval")
@@ -9484,8 +9716,8 @@ function AjuanApprovalProcess({ detail, onBack, setConfirm, onUpdateAjuan }) {
       body: approved
         ? `${detail.nomor} akan berubah menjadi Disetujui dan surat approval ${approvalFile.name} tersimpan.`
         : `${detail.nomor} akan ditolak dengan catatan: ${trimmedRejectionNote}`,
-      onConfirm: () => {
-        onUpdateAjuan?.(detail.nomor, {
+      onConfirm: async () => {
+        await onUpdateAjuan?.(detail.nomor, {
           ...detail,
           status,
           catatanPimpinan: approved ? trimmedApprovalNote : trimmedRejectionNote,
@@ -9681,9 +9913,9 @@ function buildReportData(filters) {
   };
   const heads = {
     "Surat Masuk": ["Agenda", "Nomor Surat", "Pengirim", "Perihal", "Status"],
-    "Surat Keluar": ["Nomor", "Jenis", "Tujuan", "Perihal", "Status"],
-    "Ajuan Surat": ["Nomor", "Jenis", "Pengaju", "Perihal", "Status"],
-    Disposisi: ["ID", "Nomor Surat", "Tujuan", "Instruksi", "Status"]
+    "Surat Keluar": ["Nomor Surat", "Jenis", "Tujuan", "Perihal", "Status"],
+    "Ajuan Surat": ["Nomor Ajuan", "Jenis", "Pengaju", "Perihal", "Status"],
+    Disposisi: ["Kode Disposisi", "Nomor Surat", "Tujuan", "Instruksi", "Status"]
   };
   const selectedRows = sourceRows[filters.type] || sourceRows["Surat Masuk"];
   const filteredRows = filters.status === "Semua Status"
@@ -10182,10 +10414,13 @@ function LoginField({ label, error, icon, action, actionLabel, actionPressed, on
 
 function ConfirmModal({ confirm, setConfirm }) {
   const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState("");
   const confirmAction = async () => {
     setConfirming(true);
-    setConfirm(null);
-    await confirm.onConfirm?.();
+    setConfirmError("");
+    try { await confirm.onConfirm?.(); setConfirm(null); }
+    catch (error) { setConfirmError(error.message); }
+    finally { setConfirming(false); }
   };
 
   return (
@@ -10193,6 +10428,7 @@ function ConfirmModal({ confirm, setConfirm }) {
       <section className="modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
         <h3>{confirm.title}</h3>
         <p>{confirm.body}</p>
+        {confirmError && <p className="fieldError" role="alert">{confirmError}</p>}
         <div className="actions end"><button className="ghostBtn" disabled={confirming} onClick={() => setConfirm(null)}>Batal</button><button className="primaryBtn" disabled={confirming} onClick={confirmAction}>Ya, lanjutkan</button></div>
       </section>
     </div>

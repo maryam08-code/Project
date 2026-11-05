@@ -1752,6 +1752,7 @@ textarea:focus {
 
 .dashboardPage {
   display: grid;
+  min-width: 0;
   gap: 20px;
 }
 
@@ -1928,7 +1929,8 @@ textarea:focus {
 
 .dashboardStats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(190px, 1fr));
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
   gap: 18px;
 }
 
@@ -1945,13 +1947,19 @@ textarea:focus {
 
 .dashStat {
   position: relative;
+  min-width: 0;
   min-height: 144px;
   display: grid;
-  grid-template-columns: 78px 1fr 72px;
+  grid-template-columns: 72px minmax(0, 1fr);
   align-items: center;
   gap: 18px;
   border-radius: 18px;
   padding: 24px 22px;
+}
+
+.dashStat > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .dashStat.clickable {
@@ -2124,6 +2132,57 @@ textarea:focus {
   font-size: 12px;
   font-weight: 500;
   text-transform: none;
+}
+
+/* The recent-requests table has six columns, including its own numeric key. */
+.requestsPanel {
+  min-width: 0;
+}
+
+.requestsPanel > .tableScroll {
+  max-width: 100%;
+}
+
+.dashboardTable.recentRequestsTable {
+  min-width: 820px;
+}
+
+.dashboardTable.recentRequestsTable th,
+.dashboardTable.recentRequestsTable td {
+  width: auto;
+  padding: 13px 12px;
+  overflow-wrap: anywhere;
+}
+
+.recentRequestsTable .recordNumberColumn { width: 72px; }
+.recentRequestsTable .referenceColumn { width: 22%; }
+.recentRequestsTable .dateColumn { width: 160px; }
+.recentRequestsTable .statusColumn { width: 176px; }
+.recentRequestsTable .actionColumn { width: 76px; }
+
+.dashboardTable.recentRequestsTable th:nth-last-child(-n + 2),
+.dashboardTable.recentRequestsTable td:nth-last-child(-n + 2) {
+  text-align: center;
+}
+
+.dashboardTable.recentRequestsTable .status,
+table.numberedRecordsTable .status {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  padding: 5px 10px;
+  justify-content: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.dashboardTable.recentRequestsTable .viewBtn {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
 }
 
 .dashNoticeList {
@@ -2675,13 +2734,14 @@ textarea:focus {
 }
 
 .previewLayout {
+  min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 18px;
 }
 
 .previewLayout.singleColumn {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .approvalWideLayout {
@@ -3024,8 +3084,52 @@ textarea:focus {
   min-width: 112px;
 }
 
+/* Numbered shared tables reserve independent space for status and actions. */
+.approvalTable.numberedRecordsTable {
+  min-width: 1020px;
+  table-layout: auto;
+}
+
+.approvalTable.numberedRecordsTable th,
+.approvalTable.numberedRecordsTable td {
+  width: auto;
+  padding: 13px 12px;
+}
+
+.approvalTable.numberedRecordsTable th:first-child,
+.approvalTable.numberedRecordsTable td:first-child {
+  width: 72px;
+}
+
+.approvalTable.numberedRecordsTable .recordStatusCell {
+  width: 176px;
+  min-width: 176px;
+  text-align: center;
+}
+
+.approvalTable.numberedRecordsTable .recordActionCell {
+  width: 248px;
+  min-width: 248px;
+  text-align: center;
+}
+
+.approvalTable.numberedRecordsTable .recordActionCell .actions {
+  justify-content: center;
+}
+
+.approvalTable.numberedRecordsTable.pimpinanIncomingReviewTable .recordActionCell {
+  width: 84px;
+  min-width: 84px;
+}
+
 .tableScroll {
+  min-width: 0;
+  max-width: 100%;
   overflow-x: auto;
+}
+
+.tableShell {
+  min-width: 0;
 }
 
 table {
@@ -6210,6 +6314,7 @@ td {
 }
 
 .incomingPage {
+  min-width: 0;
   display: grid;
   gap: 22px;
 }
@@ -9664,6 +9769,35 @@ td {
 .archiveTable th:nth-child(6),
 .archiveTable td:nth-child(6) {
   min-width: 130px;
+}
+
+.archiveTable.numberedRecordsTable {
+  min-width: 1080px;
+  table-layout: fixed;
+}
+
+.archiveTable.numberedRecordsTable th,
+.archiveTable.numberedRecordsTable td {
+  width: auto;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.archiveTable.numberedRecordsTable .recordNumberColumn { width: 72px; }
+.archiveTable.numberedRecordsTable .referenceColumn { width: 210px; }
+.archiveTable.numberedRecordsTable .sourceColumn { width: 140px; }
+.archiveTable.numberedRecordsTable .dateColumn { width: 160px; }
+.archiveTable.numberedRecordsTable .statusColumn { width: 176px; }
+.archiveTable.numberedRecordsTable .actionColumn { width: 104px; }
+
+.archiveTable.numberedRecordsTable th:nth-last-child(-n + 2),
+.archiveTable.numberedRecordsTable td:nth-last-child(-n + 2) {
+  text-align: center;
+}
+
+.archivePage .archivePagination {
+  min-width: 0;
 }
 
 .archivePagination {

@@ -111,7 +111,7 @@ incomingLettersRouter.get("/", requireAuth, requireRole("administrator", "operat
     if (request.user.role_code === "pimpinan") params.push(request.user.id);
 
     const result = await query(
-      `SELECT incoming_letters.id, agenda_number, letter_number, letter_date, received_date,
+      `SELECT incoming_letters.id, incoming_letters.number, agenda_number, letter_number, letter_date, received_date,
               sender, subject, summary, incoming_letters.status AS status, forwarded_at,
               incoming_letters.created_at AS registered_at,
               leader.full_name AS forwarded_to_name,
@@ -235,15 +235,15 @@ incomingLettersRouter.post("/", requireAuth, requireRole("administrator", "opera
   }
 });
 
-incomingLettersRouter.get("/:id/documents/:documentId/download", requireAuth, requireRole("administrator", "operator", "pimpinan", "user"), async (request, response, next) => {
+incomingLettersRouter.get("/:id/documents/:documentId/download", requireAuth, requireRole("administrator", "operator", "pimpinan", "user", "pegawai"), async (request, response, next) => {
   try {
     const roleFilter = request.user.role_code === "pimpinan"
       ? "AND incoming_letters.forwarded_to = $3"
-      : request.user.role_code === "user"
+      : ["user", "pegawai"].includes(request.user.role_code)
         ? "AND EXISTS (SELECT 1 FROM dispositions WHERE dispositions.incoming_letter_id = incoming_letters.id AND dispositions.target_user_id = $3 AND dispositions.deleted_at IS NULL)"
         : "";
     const params = [request.params.id, request.params.documentId];
-    if (["pimpinan", "user"].includes(request.user.role_code)) params.push(request.user.id);
+    if (["pimpinan", "user", "pegawai"].includes(request.user.role_code)) params.push(request.user.id);
 
     const result = await query(
       `SELECT incoming_letters.id AS incoming_id,

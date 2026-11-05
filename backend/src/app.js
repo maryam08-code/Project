@@ -15,6 +15,7 @@ import { notificationsRouter } from "./routes/notifications.js";
 import publicRoutes from "./routes/publicRoutes.js"; // <-- 1. IMPORT DI SINI
 import { usersRouter } from "./routes/users.js";
 import { finalLettersRouter } from "./routes/final-letters.js";
+import { letterRecordsRouter } from "./routes/letter-records.js";
 
 export function createApp() {
   const app = express();
@@ -28,6 +29,7 @@ export function createApp() {
   app.use("/api/auth", authRouter);
   app.use("/api", metaRouter);
   app.use("/api/users", usersRouter);
+  app.use("/api", letterRecordsRouter);
   app.use("/api/final-letters", finalLettersRouter);
   app.use("/api/incoming-letters", incomingLettersRouter);
   app.use("/api/dispositions", dispositionsRouter);

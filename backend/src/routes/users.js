@@ -46,7 +46,7 @@ usersRouter.get("/", requireAuth, requireRole("administrator"), async (request, 
 
     const dataValues = [...values, perPage, offset];
     const result = await query(
-      `SELECT users.id, users.full_name, users.username, users.email, users.position, users.status,
+      `SELECT users.id, users.number, users.full_name, users.username, users.email, users.position, users.status,
               roles.name AS role, units.name AS unit
        FROM users
        JOIN roles ON roles.id = users.role_id
